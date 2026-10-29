@@ -1,0 +1,43 @@
+# Invented students. Any resemblance to real people is accidental.
+# All share the demo password from STUDENT_DEMO_PASSWORD in .env.
+students:
+  - username: asha
+    first: Asha
+    last: Kulkarni
+    email: asha@students.example.edu
+    roll_no: TT24CS001
+    department: Computer Science
+    program: B.Tech
+    year: "2"
+  - username: rohan
+    first: Rohan
+    last: Deshpande
+    email: rohan@students.example.edu
+    roll_no: TT24EC014
+    department: Electronics
+    program: B.Tech
+    year: "2"
+  - username: meera
+    first: Meera
+    last: Iyer
+    email: meera@students.example.edu
+    roll_no: TT23DS007
+    department: Data Science
+    program: B.Tech
+    year: "3"
+  - username: kabir
+    first: Kabir
+    last: Sethi
+    email: kabir@students.example.edu
+    roll_no: TT25CS042
+    department: Computer Science
+    program: M.Tech
+    year: "1"
+  - username: zoya
+    first: Zoya
+    last: Fernandes
+    email: zoya@students.example.edu
+    roll_no: TT22EC003
+    department: Electronics
+    program: B.Tech
+    year: "4"

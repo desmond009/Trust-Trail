@@ -1,0 +1,19 @@
+# Invented test services. Each gets its own *.localhost hostname because
+# Keycloak's pairwise mapper derives the "sector" from the redirect URI host:
+# three services all on plain "localhost" would form one sector.
+services:
+  library:
+    name: Digital Library
+    url: http://library.localhost:8001
+    wants: pseudonym         # profile the app asks for at login
+    tier: untrusted          # initial tier; caps what Keycloak will grant
+  lms:
+    name: Learning System
+    url: http://lms.localhost:8002
+    wants: partial
+    tier: semi_trusted
+  exam:
+    name: Examination Portal
+    url: http://exam.localhost:8003
+    wants: total
+    tier: fully_trusted

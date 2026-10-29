@@ -1,0 +1,61 @@
+name: trusttrail
+
+x-service-app: &service-app
+  build: ./services
+  volumes: ["./services:/app", "./config:/config:ro"]
+  depends_on:
+    keycloak: {condition: service_healthy}
+    trusttrail: {condition: service_started}
+
+services:
+  keycloak:
+    build: ./keycloak            # stock 26.8.1 + strip-sid mapper jar
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      # Browsers reach Keycloak on localhost:8080, containers on keycloak:8080.
+      # Fixed frontend URL keeps the token issuer identical for both;
+      # dynamic backchannel lets containers use the internal name for token/JWKS calls.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8080:8080"]
+    volumes: ["kc-data:/opt/keycloak/data"]
+    healthcheck:
+      # The image has no curl; talk HTTP to the management port by hand.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  trusttrail:
+    build: ./trusttrail
+    env_file: .env
+    environment:
+      KC_INTERNAL_URL: http://keycloak:8080
+      KC_PUBLIC_URL: http://localhost:8080
+    ports: ["8000:8000"]
+    # Code mounted so edits to scripts/tests apply without a rebuild.
+    volumes: ["./trusttrail:/app", "./config:/config:ro", "tt-data:/data"]
+    depends_on:
+      keycloak: {condition: service_healthy}
+
+  library:
+    <<: *service-app
+    environment: {SERVICE_ID: library, PORT: "8001", CLIENT_SECRET: "${LIBRARY_CLIENT_SECRET}", SESSION_SECRET: "${SESSION_SECRET}"}
+    ports: ["8001:8001"]
+
+  lms:
+    <<: *service-app
+    environment: {SERVICE_ID: lms, PORT: "8002", CLIENT_SECRET: "${LMS_CLIENT_SECRET}", SESSION_SECRET: "${SESSION_SECRET}"}
+    ports: ["8002:8002"]
+
+  exam:
+    <<: *service-app
+    environment: {SERVICE_ID: exam, PORT: "8003", CLIENT_SECRET: "${EXAM_CLIENT_SECRET}", SESSION_SECRET: "${SESSION_SECRET}"}
+    ports: ["8003:8003"]
+
+volumes:
+  kc-data:
+  tt-data:

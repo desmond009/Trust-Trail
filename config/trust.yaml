@@ -1,0 +1,7 @@
+# Trust tiers (from Werner et al. 2017) and the most revealing profile each may receive.
+# Phase 4 adds the score inputs and violation steps; these are starting values to tune.
+tiers:
+  fully_trusted: total     # legal contract with the university
+  semi_trusted: partial
+  untrusted: pseudonym
+  blocked: anonymous       # bottom tier after repeated violations

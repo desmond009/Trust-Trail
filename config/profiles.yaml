@@ -1,0 +1,21 @@
+# The four privacy profiles. Keycloak decides WHICH profile a service may get
+# (via the profile-* client scopes assigned to it); this file decides WHAT each
+# profile contains. TrustTrail's /release endpoint is the only place that
+# turns a profile into attribute values.
+#
+# Order matters: later = more revealing. Used for tier caps and violation rule 3.
+order: [anonymous, pseudonym, partial, total]
+
+profiles:
+  anonymous:
+    sub: false            # no per-service ID returned by TrustTrail (see README limits)
+    attributes: [affiliation]
+  pseudonym:
+    sub: true
+    attributes: [affiliation]
+  partial:
+    sub: true
+    attributes: [affiliation, department, program, year]
+  total:
+    sub: true
+    attributes: [affiliation, department, program, year, name, email, roll_no]

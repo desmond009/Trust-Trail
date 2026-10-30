@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import anchoring, dashboard, db, declarations, ledger, receipts, service_keys, settings
+from . import anchoring, dashboard, db, declarations, ledger, receipts, service_keys, settings, study
 from . import release as rel
 from .errors import Refusal
 from .keycloak import KeycloakAdmin
@@ -35,6 +35,7 @@ app = FastAPI(title="TrustTrail", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"],
                    session_cookie="tt_dashboard", same_site="lax")
 app.include_router(dashboard.router(kc, pmap, anchorer))
+app.include_router(study.router())   # Phase 6 usability study (prototype screens)
 
 
 @app.exception_handler(Refusal)

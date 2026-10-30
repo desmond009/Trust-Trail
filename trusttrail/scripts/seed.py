@@ -169,6 +169,37 @@ def create_dashboard_client():
         "attributes": {"post.logout.redirect.uris": f"{url}/dashboard"}})
 
 
+def create_plain_oidc_client(client_id: str, name: str, secret_env: str, redirect: str, consent: bool):
+    """Evaluation only (Phase 6): an ordinary Keycloak client with no privacy layer.
+
+    It keeps the realm's default scopes (profile, email, ...) and gets every
+    student attribute as an ID-token claim: what a service learns from a plain
+    university SSO. Used as the latency baseline and as the usability study's
+    baseline consent screen (Keycloak's default page lists scope names only).
+    """
+    cid = created_id(f"/{REALM}/clients", {
+        "clientId": client_id, "name": name, "publicClient": False, "secret": os.environ[secret_env],
+        "redirectUris": [redirect], "standardFlowEnabled": True, "consentRequired": consent,
+        # TEST ONLY: the latency benchmark logs in without a browser.
+        "directAccessGrantsEnabled": not consent})
+    for attr in ("affiliation", "department", "program", "year", "roll_no"):
+        call("POST", f"/{REALM}/clients/{cid}/protocol-mappers/models", {
+            "name": attr, "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper",
+            "config": {"user.attribute": attr, "claim.name": attr, "jsonType.label": "String",
+                       "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true"}})
+
+
+def create_evaluation_clients():
+    url = os.environ.get("TT_PUBLIC_URL", "http://localhost:8000")
+    create_plain_oidc_client("bench-baseline", "Latency baseline (plain OIDC)", "BENCH_BASELINE_CLIENT_SECRET",
+                             "http://bench.localhost:8020/callback", consent=False)
+    # The study's baseline screens: same services, Keycloak's default consent page.
+    create_plain_oidc_client("study-lms", "Learning System", "STUDY_CLIENT_SECRET",
+                             f"{url}/study/baseline/callback", consent=True)
+    create_plain_oidc_client("study-exam", "Examination Portal", "STUDY_CLIENT_SECRET",
+                             f"{url}/study/baseline/callback", consent=True)
+
+
 def create_students():
     password = os.environ["STUDENT_DEMO_PASSWORD"]
     for s in settings.load("students")["students"]:
@@ -191,6 +222,7 @@ def main():
     for sid, svc in settings.services().items():
         create_service_client(sid, svc, profile_ids, basic_id)
     create_dashboard_client()
+    create_evaluation_clients()
     create_students()
     print("seed complete")
 

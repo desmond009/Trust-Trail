@@ -532,6 +532,113 @@ Then check the contract and anchor transactions on a Sepolia block explorer. I r
 this procedure (steps 1–3, with `--network sepolia`, a separate key and `ANCHOR_NETWORK=sepolia`)
 against the local chain; a real Sepolia run still needs your RPC URL and funded key.
 
+## Phase 6: evaluation harness
+
+Everything below runs in the `trusttrail` container and writes to `trusttrail/eval/results/`
+(Markdown tables ready for the report, plus raw CSVs).
+
+```bash
+docker compose exec trusttrail sh eval/run_all.sh     # (a), (b), (c) in one go (about 3 minutes)
+```
+
+### (a) Latency: `python -m eval.bench_latency [--runs 200]`
+
+Compares a plain OIDC login (`bench-baseline`: an ordinary Keycloak client that receives
+every attribute in its ID token) with a TrustTrail login (LMS token plus `POST /release`, which
+includes the ledger entry and signed receipt). It uses 200 runs each, in random interleaved order
+after a warm-up, and reports median and p95.
+
+| Variant | Runs | Median (ms) | p95 (ms) | Mean (ms) |
+|---|---|---|---|---|
+| Plain OIDC login (no privacy layer) | 200 | 17.1 | 19.1 | 17.4 |
+| TrustTrail login + release (total) | 200 | 21.2 | 24.7 | 21.6 |
+| of which: TrustTrail `/release` | 200 | 4.2 | 5.8 | 4.4 |
+
+Overhead: median **+4.0 ms**, p95 **+5.6 ms** (an earlier run gave +3.4 / +4.5 ms; one laptop, all containers local, password grant;
+a browser login adds the same redirects to both). Anchoring runs in the background and is not
+on the login path. Each TrustTrail run is a real release, so the benchmark adds ledger entries.
+
+### (b) Tamper and violation tests: `python -m eval.tamper_test`, `python -m eval.violation_test`
+
+Both are repeatable and compare every run with what the design says should happen.
+
+| Attack (5 repetitions, random target) | Hash chain | Student receipts | Blockchain anchor | Any check |
+|---|---|---|---|---|
+| A. change an entry, leave its hash | 5/5 | 5/5 | 5/5 | 5/5 |
+| B. change an entry, recompute its hash | 5/5 | 5/5 | 5/5 | 5/5 |
+| C. delete an entry | 5/5 | 5/5 | 5/5 | 5/5 |
+| D. change an entry, recompute every later hash | 0/5 | 5/5 | 5/5 | 5/5 |
+| E. cut off the tail of the ledger | 0/5 | 5/5 | 5/5 | 5/5 |
+| F. change an entry made after the last anchor | 0/5 | 5/5 | 0/5 | 5/5 |
+
+| Bad service (3 repetitions × 5 attempts) | Rule | Detected | Missed | Wrong rule | Tier after each attempt |
+|---|---|---|---|---|---|
+| Campus Deals | 1 · undeclared attribute | 15/15 | 0 | 0 | semi_trusted → untrusted → blocked (stays) |
+| Alumni Tracker | 2 · after retention | 15/15 | 0 | 0 | semi_trusted → untrusted → blocked (stays) |
+| Career Portal | 3 · above tier cap | 15/15 | 0 | 0 | untrusted → blocked (stays) |
+| Honest services, 90 releases | | **0 false positives** | | | no tier changes |
+
+### (c) Taxonomy scoring sheet: `trusttrail/eval/taxonomy/` and `python -m eval.plot_taxonomy`
+
+- `taxonomy.csv` has nine feature rows and, per system, a score (`0`, `partial`, `full`) and an
+  evidence column. `proposals.csv` names the authors' four proposals.
+- **The feature list is a draft.** I could not verify the paper's exact nine features or the
+  four proposals, so the rows are marked `DRAFT` / `TODO`: replace them with the paper's wording
+  and fill in the proposals' scores from the paper.
+- TrustTrail has `trusttrail_suggested` (the builder's view, with evidence pointing to tests and
+  results) and an empty `trusttrail_score`. **A teammate who did not build a feature should
+  score it**, and record who in `trusttrail_scored_by`.
+- The chart (`results/taxonomy_chart.png` and `.svg`) draws empty cells as "not scored", never
+  as 0, and hatches and stars suggested scores until a real score is entered.
+
+### (d) Usability study: `/study`, `trusttrail/eval/usability/`, `python -m eval.analyze_study`
+
+Each participant plays an invented student and uses both **Keycloak's default consent screen**
+(real, unchanged: "Grant Access to … Email address, User profile, User roles. Yes / No") and the
+**TrustTrail consent screen** (a prototype: purpose, trust level, delete-by date, per-attribute
+choice with nothing pre-ticked). There are two tasks per screen:
+
+- **P:** share department, programme and year, but not email or roll number. This is impossible
+  on the all-or-nothing baseline, by design.
+- **F:** share everything, which both screens can do.
+
+Screen and task order are counterbalanced by participant code.
+
+The app measures, per task:
+- **Did they choose what they intended?** (automatic)
+- **"Which of these does the service now have?"** (comprehension; scored against what the
+  service really received)
+- **Confidence.**
+
+Per screen, it measures the purpose and retention questions, three 1–5 agreement items and an
+optional comment. Only the participant code is stored, in `study.db`.
+
+| File | For |
+|---|---|
+| `eval/usability/consent_form.md` | participants: what happens, what's recorded, voluntary, withdrawal |
+| `eval/usability/data_handling.md` | participants and team: storage, access, deletion; **check whether IIIT Dharwad needs ethics approval** |
+| `eval/usability/facilitator_guide.md` | team: checklist, pilot, session script, counterbalancing, reporting threats to validity |
+| `eval/usability/questionnaire.md` | paper backup, plus the answer key (team only) |
+| `/study/preview/P`, `/study/preview/F` | the TrustTrail screen for screenshots and piloting (records nothing) |
+
+```bash
+.venv/bin/python scripts/check_study.py                          # 2 scripted participants (P98, P99) end to end
+docker compose exec trusttrail python -m eval.analyze_study     # after real sessions -> results/study.md
+docker compose exec trusttrail python -m eval.analyze_study --delete-all --yes   # once the report is graded
+```
+
+`analyze_study` reports intended-choice rates per screen and task; comprehension (exact and
+per-item), with a paired exact sign test; purpose and retention accuracy; Likert medians; and the
+limits section. **No real study has been run yet.** Those numbers come from your sessions.
+
+### Tests
+
+- `tests/test_eval.py`: percentile, counterbalancing (4 equal groups; everyone does every
+  screen × task), what each screen releases, intended-choice scoring, Q1 scoring, the sign test,
+  and the taxonomy sheet's shape.
+- `scripts/check_study.py`: plays P98 and P99 through the real Keycloak and TrustTrail screens
+  and checks the analysis.
+
 ## Known limits (Phase 1)
 
 - **Why `sid` is stripped, and what that costs.** Keycloak 26 adds the SSO session ID (`sid`)
@@ -616,3 +723,17 @@ against the local chain; a real Sepolia run still needs your RPC URL and funded 
 - **Library versions:** Hardhat 3.20.0 is pinned (current is 3.21.x, about two weeks newer),
   with Solidity 0.8.28 and web3.py 7.16.0. web3.py 8.0 exists; we stayed on 7.x, whose API is
   established.
+
+## Known limits (Phase 6)
+
+- **The latency numbers come from one laptop** with everything local. They show the order of
+  magnitude of the privacy layer's cost (a few milliseconds), not production performance or
+  behaviour under load.
+- **The tamper and violation tests use our own scripted attacks and clients.** They show the
+  mechanisms work as designed, not how often real attackers or services would be caught.
+- **The taxonomy features are a draft and the TrustTrail scores are self-assessed** until a
+  teammate re-scores them; the authors' proposals are unscored until filled in from the paper.
+- **The usability study is small and indicative.** It uses a convenience sample of classmates,
+  a team member as facilitator, an invented persona, and a prototype screen. Students cannot yet
+  deselect attributes in the running system. Task P is impossible on the baseline screen by
+  design; comprehension is the fairer comparison.

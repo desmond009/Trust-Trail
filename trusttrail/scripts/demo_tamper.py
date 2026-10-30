@@ -84,9 +84,11 @@ def attacks(k: int, last_anchored: int, newest: int):
     ]
 
 
-def run_copy_mode(k: int | None):
+def tamper_matrix(k: int | None = None) -> tuple[list[dict], dict]:
+    """Run every attack on a fresh copy of the live database; return what each check saw."""
     ensure_entries()
-    # Anchor everything first, so the blockchain column has something to compare with.
+    # Anchor everything first, so the blockchain column has something to compare with,
+    # then add one release after the anchor to show the anchoring window (attack F).
     anchorer = anchoring.Anchorer()
     anchorer.run_once()
     batches = anchorer.on_chain_batches()
@@ -103,29 +105,40 @@ def run_copy_mode(k: int | None):
     # Default target: a release in the middle (releases have receipts; violations don't).
     releases = [e["entry_id"] for e in entries if e["kind"] == "release" and e["entry_id"] > 1]
     k = k or releases[len(releases) // 2]
-    print(f"Ledger has {len(entries)} entries; 1-{batches[-1]['last_entry_id']} anchored in {len(batches)} "
-          f"on-chain batch(es), #{len(entries)} not yet. Attacking entry #{k}.\n")
+    info = {"entries": len(entries), "anchored_up_to": batches[-1]["last_entry_id"],
+            "batches": len(batches), "target": k}
 
     rows = []
-    for name, attack in attacks(k, batches[-1]["last_entry_id"], len(entries)):
+    for name, attack in attacks(k, info["anchored_up_to"], len(entries)):
         c = copy_of_live()
         drop_guards(c)
         attack(c)
         after = ledger.all_entries(c)
         check = ledger.verify(after)
         by_id = {e["entry_id"]: e for e in after}
-        broken_receipts = sum(1 for i, h in held_hashes.items()
-                              if i not in by_id or ledger.compute_hash(by_id[i]) != h)
-        chain = f"DETECTED at #{check.first_bad_entry}" if not check.ok else "not detected"
         failed = [r for r in anchoring.verify_ledger_against_chain(after, batches) if not r["ok"]]
-        anchor = f"DETECTED (batch #{failed[0]['batch_id']})" if failed else "not detected"
-        rows.append((name, chain, f"{broken_receipts} receipt(s) fail" if broken_receipts else "all match", anchor))
+        rows.append({"attack": name[0], "name": name,
+                     "chain_detected": not check.ok, "chain_first_bad": check.first_bad_entry,
+                     "receipts_failed": sum(1 for i, h in held_hashes.items()
+                                            if i not in by_id or ledger.compute_hash(by_id[i]) != h),
+                     "anchor_detected": bool(failed), "anchor_batch": failed[0]["batch_id"] if failed else None})
+    return rows, info
 
+
+def run_copy_mode(k: int | None):
+    rows, info = tamper_matrix(k)
+    print(f"Ledger has {info['entries']} entries; 1-{info['anchored_up_to']} anchored in {info['batches']} "
+          f"on-chain batch(es), #{info['entries']} not yet. Attacking entry #{info['target']}.\n")
+    table = [(r["name"],
+              f"DETECTED at #{r['chain_first_bad']}" if r["chain_detected"] else "not detected",
+              f"{r['receipts_failed']} receipt(s) fail" if r["receipts_failed"] else "all match",
+              f"DETECTED (batch #{r['anchor_batch']})" if r["anchor_detected"] else "not detected")
+             for r in rows]
     header = ("Attack", "Chain check", "Student receipts", "Blockchain anchor")
-    w = [max(len(r[i]) for r in rows + [header]) for i in range(4)]
+    w = [max(len(r[i]) for r in table + [header]) for i in range(4)]
     print("  ".join(h.ljust(w[i]) for i, h in enumerate(header)))
     print("  ".join("-" * x for x in w))
-    for r in rows:
+    for r in table:
         print("  ".join(v.ljust(w[i]) for i, v in enumerate(r)))
     print("\nThe live ledger was not modified (each attack ran on a copy).")
     print("D and E pass the chain check: a consistent rewrite or a cut-off tail is caught only by\n"

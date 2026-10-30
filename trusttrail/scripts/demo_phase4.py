@@ -57,16 +57,16 @@ def wait_for_count(service_id: str, more_than: int, timeout: float = 15) -> dict
     return sync()[service_id]
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--attempts", type=int, default=5)
-    p.add_argument("--keep", action="store_true", help="leave the bad services demoted afterwards")
-    args = p.parse_args()
+def detection_run(attempts: int, verbose: bool = True) -> tuple[list[dict], dict]:
+    """Honest traffic plus `attempts` misbehaviours per bad service, from base tiers.
 
-    reset_all("start of Phase 4 demo")
+    Returns one row per bad service and a summary of the honest traffic.
+    """
+    reset_all("start of Phase 4 detection run")
     start_id = last_entry_id()
 
-    print(f"Honest traffic: {len(HONEST)} services x {len(STUDENTS)} students x 2 rounds ...")
+    if verbose:
+        print(f"Honest traffic: {len(HONEST)} services x {len(STUDENTS)} students x 2 rounds ...")
     honest_releases = 0
     for sid in HONEST:
         decl = DemoService(sid).declare()
@@ -80,33 +80,46 @@ def main():
         bad = cls(sid)
         first = sync()[sid]
         tiers, caps, state = [first["tier"]], [first["cap"]], first
-        print(f"{sid}: {args.attempts} attempts ...")
-        for _ in range(args.attempts):
+        if verbose:
+            print(f"{sid}: {attempts} attempts ...")
+        for _ in range(attempts):
             bad.misbehave(STUDENTS[0])
             state = wait_for_count(sid, state["violations"])
             tiers.append(state["tier"])
             caps.append(state["cap"])
         caught = [v for v in violation_entries(start_id) if v["service_id"] == sid]
-        rows.append({"sid": sid, "detected": sum(v["rule"] == RULE[sid] for v in caught),
+        rows.append({"sid": sid, "rule": RULE[sid], "attempts": attempts,
+                     "detected": sum(v["rule"] == RULE[sid] for v in caught),
                      "wrong_rule": sum(v["rule"] != RULE[sid] for v in caught),
                      "score": (first["score"], state["score"]), "tiers": tiers, "caps": caps})
 
-    honest_violations = [v for v in violation_entries(start_id) if v["service_id"] in HONEST]
     states = sync()
+    honest = {"releases": honest_releases,
+              "violations": len([v for v in violation_entries(start_id) if v["service_id"] in HONEST]),
+              "tier_changes": sum(states[s]["tier"] != states[s]["base_tier"] for s in HONEST)}
+    return rows, honest
 
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--attempts", type=int, default=5)
+    p.add_argument("--keep", action="store_true", help="leave the bad services demoted afterwards")
+    args = p.parse_args()
+
+    rows, honest = detection_run(args.attempts)
     names = settings.services()
     print("\n### Violation detection (simulated services)\n")
     print("| Service | Misbehaviour | Rule | Attempts | Detected | Missed | Score | Tier after each attempt | Max profile |")
     print("|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         what, rule = BEHAVIOUR[r["sid"]]
-        print(f"| {names[r['sid']]['name']} (`{r['sid']}`) | {what} | {rule} | {args.attempts} | {r['detected']} "
-              f"| {args.attempts - r['detected']} | {r['score'][0]} → {r['score'][1]} | {' → '.join(r['tiers'])} "
+        print(f"| {names[r['sid']]['name']} (`{r['sid']}`) | {what} | {rule} | {r['attempts']} | {r['detected']} "
+              f"| {r['attempts'] - r['detected']} | {r['score'][0]} → {r['score'][1]} | {' → '.join(r['tiers'])} "
               f"| {r['caps'][0]} → {r['caps'][-1]} |")
-    print(f"\n| Honest services | Releases | Violations recorded (false positives) | Tier changes |")
+    print("\n| Honest services | Releases | Violations recorded (false positives) | Tier changes |")
     print("|---|---|---|---|")
-    print(f"| {', '.join(names[s]['name'] for s in HONEST)} | {honest_releases} | {len(honest_violations)} "
-          f"| {sum(states[s]['tier'] != states[s]['base_tier'] for s in HONEST)} |")
+    print(f"| {', '.join(names[s]['name'] for s in HONEST)} | {honest['releases']} | {honest['violations']} "
+          f"| {honest['tier_changes']} |")
     if any(r["wrong_rule"] for r in rows):
         print("\nWARNING: some violations were recorded under an unexpected rule:",
               {r["sid"]: r["wrong_rule"] for r in rows})
@@ -115,7 +128,6 @@ def main():
     if not args.keep:
         reset_all("end of Phase 4 demo")
         print("All services reset to their base tier (recorded in the ledger). Use --keep to inspect the demoted state.")
-
 
 if __name__ == "__main__":
     main()

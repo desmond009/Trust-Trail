@@ -1,0 +1,60 @@
+# Usability study (Phase 6): scenarios and questions. Edit wording here, not in code.
+# Everything refers to the invented persona below; participants never use their own data.
+
+persona:
+  username: asha                 # participants log in as this fake student on the baseline screens
+  name: Asha Kulkarni
+  email: asha@students.example.edu
+  roll_no: TT24CS001
+  department: Computer Science
+  program: B.Tech
+  year: "2"
+
+# Plain-language labels used on the TrustTrail screen and in the questionnaire.
+labels:
+  name: Your full name
+  email: Your email address
+  roll_no: Your roll number
+  department: Your department
+  program: Your programme
+  year: Your year of study
+  service_id: An ID that only this service uses
+  account_id: Your university account ID (the same for every service)
+
+# Each participant does both scenarios on both screens (4 tasks). Scenario P
+# needs partial sharing; scenario F wants everything shared, which the baseline
+# screen can also express, so the comparison is not rigged in either direction.
+scenarios:
+  P:
+    service: Learning System
+    baseline_client: study-lms
+    task: >-
+      You want to enrol in your courses. The Learning System needs your department,
+      programme and year. You do NOT want it to have your email address or roll number.
+      Share only what you want to share.
+    purpose: Enrol you in the courses of your department, programme and year.
+    tier: Semi-trusted (may receive at most your partial profile)
+    keep_days: 180
+    optional: [department, program, year, email, roll_no]     # offered on the TrustTrail screen
+    intended: [department, program, year]                     # what the task asks the participant to share
+  F:
+    service: Examination Portal
+    baseline_client: study-exam
+    task: >-
+      You need your exam hall ticket. You are happy for the Examination Portal to
+      have everything it asks for. Share it.
+    purpose: Print your name and roll number on hall tickets, and email you your results.
+    tier: Fully trusted (has a contract with the university)
+    keep_days: 365
+    optional: [name, roll_no, email, department, program, year]
+    intended: [name, roll_no, email, department, program, year]
+
+# What the baseline (plain Keycloak, consent screen) client receives if the participant accepts.
+baseline_receives: [name, email, roll_no, department, program, year, account_id]
+# What TrustTrail always releases with any choice (besides "that you are a student").
+trusttrail_always: [service_id]
+
+likert:
+  - I understood exactly what I was agreeing to share.
+  - I could share exactly what I wanted to.
+  - I would be comfortable using this kind of screen for real university services.

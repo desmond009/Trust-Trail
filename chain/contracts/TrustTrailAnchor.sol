@@ -36,9 +36,9 @@ contract TrustTrailAnchor {
         if (firstEntryId != expected) revert NotContiguous(expected);
 
         batchId = batches.length;
-        uint64 at = uint64(block.timestamp);
-        batches.push(Batch(root, firstEntryId, lastEntryId, at));
-        emit Anchored(batchId, root, firstEntryId, lastEntryId, at);
+        uint64 timestamp = uint64(block.timestamp);
+        batches.push(Batch(root, firstEntryId, lastEntryId, timestamp));
+        emit Anchored(batchId, root, firstEntryId, lastEntryId, timestamp);
     }
 
     function batchCount() external view returns (uint256) {

@@ -1,0 +1,10 @@
+repetition,service,rule,attempts,detected,wrong_rule,score_before,score_after,tiers,cap_before,cap_after
+1,overasker,undeclared_attribute,5,5,0,100,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+1,retainer,after_retention,5,5,0,85,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+1,tiercap,above_tier_cap,5,5,0,100,0,untrusted > blocked > blocked > blocked > blocked > blocked,pseudonym,anonymous
+2,overasker,undeclared_attribute,5,5,0,100,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+2,retainer,after_retention,5,5,0,85,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+2,tiercap,above_tier_cap,5,5,0,100,0,untrusted > blocked > blocked > blocked > blocked > blocked,pseudonym,anonymous
+3,overasker,undeclared_attribute,5,5,0,100,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+3,retainer,after_retention,5,5,0,85,0,semi_trusted > untrusted > blocked > blocked > blocked > blocked,partial,anonymous
+3,tiercap,above_tier_cap,5,5,0,100,0,untrusted > blocked > blocked > blocked > blocked > blocked,pseudonym,anonymous

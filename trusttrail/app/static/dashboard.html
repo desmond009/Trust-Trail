@@ -27,6 +27,7 @@
   .result li { list-style:none; }
   .pass { color:var(--ok); } .fail { color:var(--bad); }
   .status { font-weight:600; }
+  tr.refused { background:#fdf3f2; }
   @media (max-width: 720px) {
     thead { display:none; }
     tr { display:block; border-bottom:1px solid var(--line); padding:8px 0; }
@@ -43,7 +44,7 @@
 <main><div class="wrap">
   <div class="card" id="ledger-status"><span class="muted">Checking the ledger…</span></div>
   <div class="card" id="content"><span class="muted">Loading…</span></div>
-  <p class="muted">Each row is one release recorded in TrustTrail's hash-chained ledger. Services receive a different
+  <p class="muted">Each row is one release, or one refused request (red), recorded in TrustTrail's hash-chained ledger. Services receive a different
   pseudonymous ID each; they see only the attributes listed. A receipt proves what was released and what the service
   promised. It cannot prove the service deleted the data by the date shown.</p>
 </div></main>
@@ -92,8 +93,21 @@ async function load() {
     return;
   }
   const today = new Date().toISOString().slice(0, 10);
+  const RULES = {undeclared_attribute: "asked for data its promise didn't cover",
+                 after_retention: "asked again after it promised to delete your data",
+                 above_tier_cap: "asked for more than its trust level allows"};
   const rows = data.releases.map(x => {
     const out = el("div");
+    if (x.kind === "violation") return el("tr", {className: "refused"},
+      el("td", {dataset: {label: "When"}}, new Date(x.time).toLocaleString()),
+      el("td", {dataset: {label: "Service"}}, x.service, el("div", {className: "muted"}, `profile: ${x.profile}`)),
+      el("td", {dataset: {label: "Attributes"}}, el("div", {className: "fail"}, "Refused, nothing released"),
+        el("div", {className: "muted"}, "asked for: "), x.requested.map(a => el("span", {className: "tag"}, a))),
+      el("td", {dataset: {label: "Purpose"}}, el("b", {}, `Violation: ${RULES[x.rule] || x.rule}. `), x.purpose),
+      el("td", {dataset: {label: "Delete by"}}, x.delete_by || "–"),
+      el("td", {dataset: {label: "Evidence"}},
+        el("button", {onclick: () => verify(x.entry_id, out)}, "Verify"),
+        el("div", {className: "muted"}, `entry #${x.entry_id}`), out));
     return el("tr", {},
       el("td", {dataset: {label: "When"}}, new Date(x.time).toLocaleString()),
       el("td", {dataset: {label: "Service"}}, x.service, el("div", {className: "muted"}, `profile: ${x.profile}`)),

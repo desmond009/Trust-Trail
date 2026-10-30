@@ -86,7 +86,9 @@ def run_copy_mode(k: int | None):
     # (from Phase 5) the anchored head hash. Captured before the attacks.
     held_hashes = {e["entry_id"]: receipts.verify(jws)["entry_hash"]
                    for e in entries if (jws := ledger.receipt(live, e["entry_id"]))}
-    k = k or max(2, len(entries) // 2)
+    # Default target: a release in the middle (releases have receipts; violations don't).
+    releases = [e["entry_id"] for e in entries if e["kind"] == "release" and e["entry_id"] > 1]
+    k = k or releases[len(releases) // 2]
     print(f"Ledger has {len(entries)} entries, head {before.head_hash[:16]}…; attacking entry #{k}.\n")
 
     rows = []

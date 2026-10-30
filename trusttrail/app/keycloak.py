@@ -27,15 +27,18 @@ class KeycloakAdmin:
             self._token, self._expires = body["access_token"], time.time() + body["expires_in"]
         return self._token
 
-    def get(self, path: str, **params):
+    def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         url = f"{self.base}/admin/realms/{self.realm}{path}"
-        r = self.http.get(url, params=params, headers={"Authorization": f"Bearer {self._bearer()}"})
+        r = self.http.request(method, url, headers={"Authorization": f"Bearer {self._bearer()}"}, **kwargs)
         if r.status_code == 401:
             # Cached token died early, e.g. the realm was re-seeded. Retry once with a fresh one.
             self._expires = 0.0
-            r = self.http.get(url, params=params, headers={"Authorization": f"Bearer {self._bearer()}"})
+            r = self.http.request(method, url, headers={"Authorization": f"Bearer {self._bearer()}"}, **kwargs)
         r.raise_for_status()
-        return r.json()
+        return r
+
+    def get(self, path: str, **params):
+        return self._request("GET", path, params=params).json()
 
     def client(self, client_id: str) -> dict:
         found = self.get("/clients", clientId=client_id)
@@ -48,6 +51,20 @@ class KeycloakAdmin:
             if m["protocolMapper"] == PAIRWISE_MAPPER:
                 return m
         return None
+
+    def client_scope_ids(self) -> dict[str, str]:
+        return {s["name"]: s["id"] for s in self.get("/client-scopes")}
+
+    def optional_scopes(self, client_uuid: str) -> set[str]:
+        return {s["name"] for s in self.get(f"/clients/{client_uuid}/optional-client-scopes")}
+
+    def set_optional_scope(self, client_uuid: str, scope_id: str, assigned: bool):
+        # Needs the realm-management "manage-clients" role (granted to TrustTrail by the seed).
+        self._request("PUT" if assigned else "DELETE", f"/clients/{client_uuid}/optional-client-scopes/{scope_id}")
+
+    def login_errors(self, max_events: int = 200) -> list[dict]:
+        """Recent LOGIN_ERROR events, newest first (needs "view-events")."""
+        return self.get("/events", type="LOGIN_ERROR", max=max_events)
 
     def users(self) -> list[dict]:
         return self.get("/users", max=1000, briefRepresentation="false")

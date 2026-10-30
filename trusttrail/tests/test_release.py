@@ -36,19 +36,36 @@ def test_profiles_are_nested():
 
 def test_default_request_is_declared_and_allowed():
     declared = ["sub", "affiliation", "department", "roll_no"]
-    assert choose_attributes(None, declared, profile_attributes("partial")) == ["affiliation", "department", "sub"]
+    allowed = profile_attributes("partial")
+    assert choose_attributes(None, declared, allowed, allowed) == ["affiliation", "department", "sub"]
 
 
-def test_request_beyond_declaration_is_refused():
+def refusal(requested, declared, allowed, entitled) -> Refusal:
     with pytest.raises(Refusal) as e:
-        choose_attributes(["email"], ["sub", "affiliation"], profile_attributes("total"))
-    assert e.value.code == "attribute_not_declared"
+        choose_attributes(requested, declared, profile_attributes(allowed), profile_attributes(entitled))
+    return e.value
 
 
-def test_request_beyond_profile_is_refused():
-    with pytest.raises(Refusal) as e:
-        choose_attributes(["roll_no"], ["sub", "roll_no"], profile_attributes("pseudonym"))
-    assert e.value.code == "attribute_above_profile"
+def test_undeclared_attribute_is_rule_1():
+    r = refusal(["email"], ["sub", "affiliation"], "total", "total")
+    assert (r.code, r.rule) == ("attribute_not_declared", "undeclared_attribute")
+
+
+def test_above_tier_cap_is_rule_3():
+    r = refusal(["roll_no"], ["sub", "roll_no"], "pseudonym", "pseudonym")
+    assert (r.code, r.rule) == ("attribute_above_tier_cap", "above_tier_cap")
+
+
+def test_above_granted_profile_but_within_cap_is_not_a_violation():
+    # e.g. the LMS logged the student in with `pseudonym` but asks for department
+    r = refusal(["department"], ["sub", "department"], "pseudonym", "partial")
+    assert (r.code, r.rule) == ("attribute_above_profile", None)
+
+
+def test_above_lowered_cap_but_within_agreement_is_not_counted_again():
+    # a demoted service (now pseudonym) asking what its agreement (partial) allowed
+    r = refusal(["year"], ["sub", "year"], "pseudonym", "partial")
+    assert r.rule is None
 
 
 def test_build_release_fills_values_and_pseudonym():
@@ -57,5 +74,5 @@ def test_build_release_fills_values_and_pseudonym():
 
 
 def test_anonymous_release_has_no_identifier():
-    names = choose_attributes(None, ["sub", "affiliation"], profile_attributes("anonymous"))
+    names = choose_attributes(None, ["sub", "affiliation"], profile_attributes("anonymous"), profile_attributes("total"))
     assert build_release(names, student_attributes(USER), "pseudo-123") == {"affiliation": "student"}

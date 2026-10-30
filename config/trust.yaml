@@ -1,7 +1,24 @@
 # Trust tiers (from Werner et al. 2017) and the most revealing profile each may receive.
-# Phase 4 adds the score inputs and violation steps; these are starting values to tune.
+# Every number here is a starting value to tune, not a validated constant.
 tiers:
   fully_trusted: total     # legal contract with the university
   semi_trusted: partial
   untrusted: pseudonym
   blocked: anonymous       # bottom tier after repeated violations
+
+# Lowest to highest. A service's tier in services.yaml is its *base* tier (its
+# agreement with the university); the score can only move it down from there.
+tier_order: [blocked, untrusted, semi_trusted, fully_trusted]
+
+score:
+  start: 100
+  no_privacy_policy: 15        # client has no policyUri registered in Keycloak
+  incomplete_metadata: 10      # any of required_metadata missing
+  required_metadata: [name, description, rootUrl, tosUri]
+  violation_step: 25           # points lost per recorded violation
+  tier_band: 25                # every full 25 points below `start` = one tier down
+  violation_window_days: 90    # older violations stop counting
+
+# How often TrustTrail reads Keycloak's LOGIN_ERROR events (rule 3) and
+# re-applies every service's scope cap in Keycloak.
+sync_seconds: 3

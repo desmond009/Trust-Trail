@@ -35,12 +35,14 @@ CREATE TABLE IF NOT EXISTS declarations (
 -- and each entry carries the previous entry's hash. See app/ledger.py.
 CREATE TABLE IF NOT EXISTS ledger (
     entry_id            INTEGER PRIMARY KEY,  -- 1, 2, 3 ... assigned by us, so gaps show
-    kind                TEXT NOT NULL,        -- "release" (Phase 4 adds "violation")
+    kind                TEXT NOT NULL,        -- "release" | "violation" | "trust_reset"
+    rule                TEXT NOT NULL,        -- violation rule, "" otherwise
     time                TEXT NOT NULL,        -- ISO 8601 UTC
     service_id          TEXT NOT NULL,
     student_pseudonym   TEXT NOT NULL,        -- per-service pairwise ID, never the real student ID
     profile             TEXT NOT NULL,
-    attributes_released TEXT NOT NULL,        -- JSON list of names, never values
+    attributes_requested TEXT NOT NULL,       -- JSON list of names the service asked for
+    attributes_released TEXT NOT NULL,        -- JSON list of names, never values ([] for a violation)
     purpose             TEXT NOT NULL,
     retention_until     TEXT NOT NULL,
     declaration_id      TEXT NOT NULL,
@@ -61,13 +63,29 @@ CREATE TABLE IF NOT EXISTS receipts (
     entry_id INTEGER PRIMARY KEY REFERENCES ledger(entry_id),
     jws      TEXT NOT NULL
 );
+
+-- Latest trust evaluation per service (derived; the ledger is the source of truth).
+CREATE TABLE IF NOT EXISTS trust_state (
+    service_id TEXT PRIMARY KEY,
+    state      TEXT NOT NULL           -- JSON: score, inputs, tier, cap, ...
+);
+-- Keycloak event IDs already turned into violations (or ignored), so none counts twice.
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id TEXT PRIMARY KEY
+);
 """
 
 
 def init(conn: sqlite3.Connection) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(ledger)")}
+    if "rule" not in columns:
+        # Changing the hashed fields would invalidate every existing entry, so no migration.
+        raise RuntimeError("ledger was created before Phase 4 and has a different entry format; "
+                           "reset the demo data with: docker compose down -v")
     return conn
+
 
 DB_PATH = settings.DATA_DIR / "trusttrail.db"
 _lock = threading.Lock()

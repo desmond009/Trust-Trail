@@ -1,8 +1,13 @@
 """Turning a granted profile into the attribute values a service receives."""
 from . import settings
-from .errors import Refusal
+from .errors import ABOVE_TIER_CAP, UNDECLARED_ATTRIBUTE, Refusal
 
 SCOPE_PREFIX = "profile-"
+
+
+def lower_profile(a: str, b: str) -> str:
+    order = settings.profiles()["order"]
+    return a if order.index(a) <= order.index(b) else b
 
 
 def granted_profile(scope: str, order: list[str] | None = None) -> str:
@@ -27,24 +32,32 @@ def profile_attributes(profile: str, profiles: dict | None = None) -> set[str]:
     return set(spec["attributes"]) | ({"sub"} if spec["sub"] else set())
 
 
-def choose_attributes(requested: list[str] | None, declared: list[str], allowed: set[str]) -> list[str]:
+def choose_attributes(requested: list[str] | None, declared: list[str],
+                      allowed: set[str], entitled: set[str]) -> list[str]:
     """Which attributes to release, or a Refusal naming what is not covered.
 
-    Asking for nothing explicit means "everything my declaration covers that my
-    profile allows". Explicitly asking for more than either is refused.
+    allowed   what the granted profile allows right now (token scope, capped by current tier)
+    entitled  what the service's base tier cap allows (its agreement with the university)
+
+    Asking for nothing explicit means "everything my declaration covers that I'm
+    allowed now". Asking explicitly for more is refused; it is a violation when
+    it breaks the signed purpose (rule 1) or the tier cap (rule 3). Asking above
+    a *lowered* cap but within the agreement is refused without a new violation,
+    so a demoted service isn't punished again for its old, legitimate requests.
     """
     if requested is None:
         return sorted(set(declared) & allowed)
     not_declared = sorted(set(requested) - set(declared))
     if not_declared:
-        # Phase 4 records this as a violation (rule 1).
-        raise Refusal(403, "attribute_not_declared",
-                      f"not covered by the signed declaration: {not_declared}")
+        raise Refusal(403, "attribute_not_declared", f"not covered by the signed declaration: {not_declared}",
+                      rule=UNDECLARED_ATTRIBUTE, requested=requested)
+    above_cap = sorted(set(requested) - entitled)
+    if above_cap:
+        raise Refusal(403, "attribute_above_tier_cap", f"above this service's tier cap: {above_cap}",
+                      rule=ABOVE_TIER_CAP, requested=requested)
     above = sorted(set(requested) - allowed)
     if above:
-        # Phase 4 records this as a violation (rule 3).
-        raise Refusal(403, "attribute_above_profile",
-                      f"not allowed by the granted profile: {above}")
+        raise Refusal(403, "attribute_above_profile", f"not allowed by the granted profile: {above}")
     return sorted(set(requested))
 
 

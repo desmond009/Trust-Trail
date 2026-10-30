@@ -103,11 +103,19 @@ def test_replayed_nonce_is_refused(lms):
     assert r.status_code == 409 and error(r) == "replayed_nonce"
 
 
-def test_declared_but_above_profile_is_refused():
+def test_declared_but_above_tier_cap_is_refused():
     library = DemoService("library")
     decl = library.declare(attributes=["sub", "affiliation", "roll_no"])   # declares more than its tier
     r = release(student_token("library", "pseudonym"), decl["declaration_id"], attributes=["roll_no"])
+    assert r.status_code == 403 and error(r) == "attribute_above_tier_cap"
+    assert r.json()["violation"]["rule"] == "above_tier_cap"          # rule 3 (Phase 4)
+
+
+def test_above_granted_profile_within_cap_is_refused_without_violation(lms):
+    decl = lms.declare()
+    r = release(student_token("lms", "pseudonym"), decl["declaration_id"], attributes=["department"])
     assert r.status_code == 403 and error(r) == "attribute_above_profile"
+    assert "violation" not in r.json()
 
 
 # --- receipts -----------------------------------------------------------------------

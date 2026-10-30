@@ -109,3 +109,15 @@ def test_check_usable_window():
     with pytest.raises(Refusal) as e:
         check_usable(d, now=after_retention)                # ...retention is over
     assert e.value.code == "retention_passed"
+
+
+def test_retention_can_be_an_exact_timestamp():
+    d = verify(sign(payload(retention_until="2027-01-15T09:00:00+00:00")), key_for, now=NOW)
+    check_usable(d, now=calendar.timegm((2027, 1, 15, 8, 59, 0)))
+    with pytest.raises(Refusal) as e:
+        check_usable(d, now=calendar.timegm((2027, 1, 15, 9, 0, 1)))
+    assert (e.value.code, e.value.rule) == ("retention_passed", "after_retention")
+
+
+def test_timestamp_without_timezone_is_malformed():
+    assert refused(sign(payload(retention_until="2027-06-30T12:00:00"))) == "malformed"

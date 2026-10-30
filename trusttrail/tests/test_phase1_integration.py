@@ -16,7 +16,7 @@ except Exception:
     pytest.skip("Keycloak realm not reachable; start and seed the stack", allow_module_level=True)
 
 pytestmark = pytest.mark.integration
-SERVICES = settings.services()
+SERVICES = {k: v for k, v in settings.services().items() if not v.get("scripted")}  # the 3 test services
 STUDENTS = [s["username"] for s in settings.load("students")["students"]]
 ORDER = settings.profiles()["order"]
 

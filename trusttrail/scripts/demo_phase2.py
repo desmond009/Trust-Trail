@@ -10,6 +10,7 @@ import time
 import httpx
 import jwt
 
+from app import settings
 from app.demo_login import login, release
 from app.demo_service import TRUSTTRAIL, DemoService
 
@@ -68,9 +69,6 @@ def main():
          lambda: lms.submit(lms.sign(lms.payload(iat=now - 7200, exp=now - 3600)))),
         ("release backed by a declaration that has since expired",
          lambda: release(login("lms", "asha", "partial").json()["access_token"], short_lived["declaration_id"])),
-        ("release asks for an attribute the purpose does not cover",
-         lambda: release(login("lms", "asha", "partial").json()["access_token"],
-                         narrow["declaration_id"], ["sub", "department"])),
         ("release with no declaration",
          lambda: release(login("lms", "asha", "partial").json()["access_token"])),
         ("release using another service's declaration",
@@ -81,11 +79,21 @@ def main():
          lambda: lms.submit(lms.sign(lms.payload(attributes=["sub", "blood_group"])))),
         ("retention date already over",
          lambda: lms.submit(lms.sign(lms.payload(retention_until="2020-01-01")))),
+        # Last: since Phase 4 this is violation rule 1, which demotes the LMS.
+        ("release asks for an attribute the purpose does not cover",
+         lambda: release(login("lms", "asha", "partial").json()["access_token"],
+                         narrow["declaration_id"], ["sub", "department"])),
     ]
-    print(f"{'case':58} {'status':6} error")
+    print(f"{'case':58} {'status':6} {'error':24} violation")
     for name, call in cases:
         r = call()
-        print(f"{name:58} {r.status_code:<6} {r.json().get('error')}")
+        violation = r.json().get("violation", {}).get("rule", "")
+        print(f"{name:58} {r.status_code:<6} {r.json().get('error'):24} {violation}")
+
+    # Undo the demotion so the LMS keeps working for the next demo (recorded in the ledger).
+    httpx.post(f"{TRUSTTRAIL}/trust/lms/reset", json={"reason": "after Phase 2 demo"},
+               headers={"Authorization": f"Bearer {settings.ADMIN_TOKEN}"}).raise_for_status()
+    print("\n(The LMS was demoted by the last case; a recorded trust reset restored it.)")
 
 
 if __name__ == "__main__":

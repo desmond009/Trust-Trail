@@ -55,7 +55,8 @@ def test_chain_links_and_verifies(conn):
 
 
 def test_hash_is_canonical():
-    e = {**make_entry(0), "entry_id": 1, "time": "2026-10-30T10:00:00.000000Z", "prev_hash": ledger.GENESIS}
+    e = {**make_entry(0), "entry_id": 1, "rule": "", "attributes_requested": ["sub"],
+         "time": "2026-10-30T10:00:00.000000Z", "prev_hash": ledger.GENESIS}
     reordered = dict(reversed(list(e.items())))
     assert ledger.compute_hash(e) == ledger.compute_hash(reordered)
     assert ledger.compute_hash({**e, "purpose": e["purpose"] + " "}) != ledger.compute_hash(e)
@@ -115,3 +116,17 @@ def test_entries_for_one_student(conn):
     mine = ledger.entries_for(conn, {"lms": "pseudo-1"})
     assert [e["entry_id"] for e in mine] == [4, 2]   # newest first, other student excluded
     assert ledger.entries_for(conn, {}) == []
+
+
+def test_violations_count_only_after_the_latest_reset(conn):
+    def violation():
+        ledger.append(conn, {"kind": "violation", "rule": "undeclared_attribute", "service_id": "lms",
+                             "attributes_requested": ["email"]})
+    violation()
+    violation()
+    assert len(ledger.violations_since(conn, "lms", "2000-01-01")) == 2
+    ledger.append(conn, {"kind": "trust_reset", "service_id": "lms", "purpose": "reviewed"})
+    assert ledger.violations_since(conn, "lms", "2000-01-01") == []
+    violation()
+    assert len(ledger.violations_since(conn, "lms", "2000-01-01")) == 1
+    assert ledger.verify(ledger.all_entries(conn)).ok     # resets and violations are chained too

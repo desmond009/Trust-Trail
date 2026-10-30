@@ -2,14 +2,21 @@
 # Keycloak's pairwise mapper derives the "sector" from the redirect URI host:
 # three services all on plain "localhost" would form one sector.
 #
-# `declaration` is what each service signs and submits to TrustTrail before
-# asking for attributes. `sub` (the per-service pseudonym) counts as an attribute.
+# tier         base tier = the service's agreement with the university; the trust
+#              score can only lower it (config/trust.yaml)
+# declaration  what the service signs and submits before asking for attributes;
+#              `sub` (the per-service pseudonym) counts as an attribute
+# policy_uri / tos_uri / description   registration metadata, a trust score input
+# scripted     no web app; driven by trusttrail/scripts/bad_services.py
 services:
   library:
     name: Digital Library
+    description: E-book lending for enrolled students.
     url: http://library.localhost:8001
-    wants: pseudonym         # profile the app asks for at login
-    tier: untrusted          # initial tier; caps what Keycloak will grant
+    policy_uri: http://library.localhost:8001/privacy
+    tos_uri: http://library.localhost:8001/terms
+    wants: pseudonym
+    tier: untrusted
     declaration:
       attributes: [sub, affiliation]
       purpose: Confirm you are a current student before lending e-books, and keep your loan history.
@@ -17,7 +24,10 @@ services:
       valid_days: 30
   lms:
     name: Learning System
+    description: Course enrolment and coursework.
     url: http://lms.localhost:8002
+    policy_uri: http://lms.localhost:8002/privacy
+    tos_uri: http://lms.localhost:8002/terms
     wants: partial
     tier: semi_trusted
     declaration:
@@ -27,11 +37,59 @@ services:
       valid_days: 30
   exam:
     name: Examination Portal
+    description: Hall tickets and results.
     url: http://exam.localhost:8003
+    policy_uri: http://exam.localhost:8003/privacy
+    tos_uri: http://exam.localhost:8003/terms
     wants: total
     tier: fully_trusted
     declaration:
       attributes: [sub, affiliation, department, program, year, name, email, roll_no]
       purpose: Print your name and roll number on hall tickets, and email you your results.
       retention_days: 365
+      valid_days: 30
+
+  # --- scripted bad services (Phase 4). Their declarations look honest; the
+  # misbehaviour is in what they do afterwards. ---------------------------------
+  overasker:
+    name: Campus Deals
+    description: Student discounts from local shops.
+    url: http://overasker.localhost:8011
+    policy_uri: http://overasker.localhost:8011/privacy
+    tos_uri: http://overasker.localhost:8011/terms
+    wants: partial
+    tier: semi_trusted
+    scripted: true             # asks for attributes its declaration doesn't cover (rule 1)
+    declaration:
+      attributes: [sub, affiliation]
+      purpose: Check that you are a student before showing student-only discounts.
+      retention_days: 30
+      valid_days: 30
+  retainer:
+    name: Alumni Tracker
+    description: Keeps in touch with graduates.
+    url: http://retainer.localhost:8012
+    # no policy_uri: shows the "privacy policy declared" score input
+    tos_uri: http://retainer.localhost:8012/terms
+    wants: partial
+    tier: semi_trusted
+    scripted: true             # keeps requesting after its promised deletion time (rule 2)
+    declaration:
+      attributes: [sub, affiliation, department, program, year]
+      purpose: Invite you to alumni events for your department and year.
+      retention_days: 30
+      valid_days: 30
+  tiercap:
+    name: Career Portal
+    description: Internship and job listings.
+    url: http://tiercap.localhost:8013
+    policy_uri: http://tiercap.localhost:8013/privacy
+    tos_uri: http://tiercap.localhost:8013/terms
+    wants: pseudonym
+    tier: untrusted
+    scripted: true             # asks Keycloak for a profile above its tier cap (rule 3)
+    declaration:
+      attributes: [sub, affiliation]
+      purpose: Show internship listings open to students.
+      retention_days: 30
       valid_days: 30

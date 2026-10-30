@@ -74,10 +74,13 @@ def router(kc, pmap) -> APIRouter:
         names = {sid: svc["name"] for sid, svc in settings.services().items()}
         with db.tx() as conn:
             entries = ledger.entries_for(conn, my_pseudonyms(s["user_id"]))
+        # Violations about this student are shown too: requests TrustTrail refused.
         return {"student": s["name"], "releases": [{
-            "entry_id": e["entry_id"], "time": e["time"], "service": names.get(e["service_id"], e["service_id"]),
-            "service_id": e["service_id"], "profile": e["profile"], "attributes": e["attributes_released"],
-            "purpose": e["purpose"], "delete_by": e["retention_until"]} for e in entries]}
+            "entry_id": e["entry_id"], "kind": e["kind"], "rule": e["rule"], "time": e["time"],
+            "service": names.get(e["service_id"], e["service_id"]), "service_id": e["service_id"],
+            "profile": e["profile"], "attributes": e["attributes_released"],
+            "requested": e["attributes_requested"], "purpose": e["purpose"],
+            "delete_by": e["retention_until"]} for e in entries]}
 
     @r.get("/api/verify/{entry_id}")
     def verify(entry_id: int, request: Request):
@@ -98,9 +101,10 @@ def router(kc, pmap) -> APIRouter:
         checks = {
             "entry content matches its hash": content_ok,
             "chain intact from the first entry up to this one": linked,
-            "receipt signed by TrustTrail": receipt_sig,
-            "receipt matches this ledger entry": receipt_match,
         }
+        if entry["kind"] == "release":   # refused requests have no receipt
+            checks["receipt signed by TrustTrail"] = receipt_sig
+            checks["receipt matches this ledger entry"] = receipt_match
         return {"entry_id": entry_id, "ok": all(checks.values()), "checks": checks,
                 "whole_ledger": chain.as_dict(), "anchor": "not available yet (Phase 5)"}
 

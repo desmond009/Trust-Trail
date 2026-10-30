@@ -54,12 +54,16 @@ def test_receipt_points_at_the_entry(lms_decl):
     assert payload["entry_id"] == entry["entry_id"] and payload["entry_hash"] == entry["entry_hash"]
 
 
-def test_refused_release_writes_nothing(lms_decl):
+def test_refusals_never_write_a_release(lms_decl):
+    token = login("lms", "asha", "partial").json()["access_token"]
     before = len(read_ledger())
-    r = release(login("lms", "asha", "partial").json()["access_token"],
-                lms_decl["declaration_id"], attributes=["roll_no"])
-    assert r.status_code == 403
+    assert release(token).status_code == 403                 # no declaration: not a rule break
     assert len(read_ledger()) == before
+
+    r = release(token, lms_decl["declaration_id"], attributes=["roll_no"])   # rule 1 (Phase 4)
+    assert r.status_code == 403
+    lms_new = [e for e in read_ledger()[before:] if e["service_id"] == "lms"]
+    assert [e["kind"] for e in lms_new] == ["violation"] and lms_new[0]["attributes_released"] == []
 
 
 def test_public_verify_matches_ledger():

@@ -12,6 +12,7 @@ OIDC_BASE = f"{KC_INTERNAL_URL}/realms/{REALM}/protocol/openid-connect"
 
 TT_CLIENT_ID = "trusttrail"
 TT_CLIENT_SECRET = os.environ.get("TRUSTTRAIL_CLIENT_SECRET", "")
+ADMIN_TOKEN = os.environ.get("TRUSTTRAIL_ADMIN_TOKEN", "")
 
 CONFIG_DIR = Path(os.environ.get("CONFIG_DIR", "/config"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -32,6 +33,10 @@ def services() -> dict:
 
 def tier_cap(tier: str) -> str:
     return load("trust")["tiers"][tier]
+
+
+def trust_rules() -> dict:
+    return load("trust")
 
 
 def declaration_rules() -> dict:

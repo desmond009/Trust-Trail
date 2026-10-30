@@ -52,6 +52,9 @@ def reset_realm():
                       "registrationAllowed": False})
     # Keycloak 24+ drops attributes not declared in the user profile. Our extra
     # student attributes (roll_no, department, ...) stay admin-only.
+    # Keep only failed logins (rule 3 needs "Invalid scopes" errors), for one day.
+    call("PUT", f"/{REALM}/events/config", {"eventsEnabled": True, "enabledEventTypes": ["LOGIN_ERROR"],
+                                             "eventsExpiration": 86400})
     up = call("GET", f"/{REALM}/users/profile")
     up["unmanagedAttributePolicy"] = "ADMIN_EDIT"
     call("PUT", f"/{REALM}/users/profile", up)
@@ -94,7 +97,11 @@ def create_trusttrail_client():
     sa = call("GET", f"/{REALM}/clients/{cid}/service-account-user")
     rm = call("GET", f"/{REALM}/clients", None)
     rm_id = next(c["id"] for c in rm if c["clientId"] == "realm-management")
-    roles = [call("GET", f"/{REALM}/clients/{rm_id}/roles/{r}") for r in ("view-users", "view-clients")]
+    # view-*: read students, clients and login errors. manage-clients: move the
+    # profile scopes on and off service clients (the trust cap). It is a broad
+    # role (it could change any client); see README limits.
+    roles = [call("GET", f"/{REALM}/clients/{rm_id}/roles/{r}")
+             for r in ("view-users", "view-clients", "view-events", "manage-clients")]
     call("POST", f"/{REALM}/users/{sa['id']}/role-mappings/clients/{rm_id}", roles)
 
 
@@ -103,7 +110,8 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
     cap = settings.tier_cap(svc["tier"])
     allowed = order[: order.index(cap) + 1]
     cid = created_id(f"/{REALM}/clients", {
-        "clientId": sid, "name": svc["name"], "publicClient": False,
+        "clientId": sid, "name": svc["name"], "description": svc.get("description", ""),
+        "publicClient": False,
         "secret": os.environ[f"{sid.upper()}_CLIENT_SECRET"],
         "rootUrl": svc["url"], "redirectUris": [f"{svc['url']}/callback"],
         "standardFlowEnabled": True, "fullScopeAllowed": False,
@@ -113,6 +121,8 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
         # TEST ONLY: lets scripts log students in without a browser.
         "directAccessGrantsEnabled": True,
         "attributes": {"post.logout.redirect.uris": svc["url"],
+                       # Registration metadata: trust score inputs.
+                       "policyUri": svc.get("policy_uri", ""), "tosUri": svc.get("tos_uri", ""),
                        # session_state in the login redirect is the same SSO
                        # session ID as `sid`, so hide it too.
                        "exclude.session.state.from.auth.response": "true",

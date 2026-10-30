@@ -15,7 +15,7 @@ from typing import Callable
 import jwt
 
 from . import db, settings
-from .errors import Refusal
+from .errors import AFTER_RETENTION, Refusal
 from .jose_util import sha256_hex
 
 TYP = "purpose-declaration+jwt"
@@ -44,8 +44,20 @@ def _bad(code: str, detail: str) -> Refusal:
     return Refusal(400, code, detail)
 
 
-def _today(now: float) -> date:
-    return datetime.fromtimestamp(now, timezone.utc).date()
+def retention_deadline(value: str) -> float:
+    """When the promised deletion is due, as a Unix time.
+
+    A plain date (YYYY-MM-DD) means the end of that day in UTC. A full timestamp
+    with a timezone is exact; the scripted retention violator uses one so the
+    demo doesn't have to wait a day.
+    """
+    if len(value) == 10:
+        day = date.fromisoformat(value)
+        return datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() + 86400
+    moment = datetime.fromisoformat(value)
+    if moment.tzinfo is None:
+        raise ValueError("timestamp needs a timezone")
+    return moment.timestamp()
 
 
 def verify(jws: str, key_for: Callable[[str, str], dict | None], now: float | None = None,
@@ -108,18 +120,19 @@ def verify(jws: str, key_for: Callable[[str, str], dict | None], now: float | No
     if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > rules["max_purpose_length"]:
         raise _bad("malformed", f"purpose must be 1-{rules['max_purpose_length']} characters")
 
+    retention = claims["retention_until"]
     try:
-        retention = date.fromisoformat(claims["retention_until"])
+        deadline = retention_deadline(retention)
     except (TypeError, ValueError):
-        raise _bad("malformed", "retention_until must be an ISO date (YYYY-MM-DD)")
-    if retention < _today(now):
+        raise _bad("malformed", "retention_until must be an ISO date (YYYY-MM-DD) or a timestamp with timezone")
+    if deadline < now:
         raise _bad("retention_in_past", "retention_until is already over")
 
     digest = sha256_hex(jws)
     return Declaration(
         declaration_id=digest[:16], client_id=client_id, nonce=str(claims["nonce"]),
         attributes=sorted(set(attributes)), purpose=purpose.strip(),
-        retention_until=retention.isoformat(), issued_at=iat, expires_at=exp,
+        retention_until=retention, issued_at=iat, expires_at=exp,
         kid=kid, jws=jws, jws_sha256=digest)
 
 
@@ -128,10 +141,11 @@ def check_usable(decl: Declaration, now: float | None = None):
     now = time.time() if now is None else now
     if now > decl.expires_at:
         raise Refusal(403, "declaration_expired", f"declaration {decl.declaration_id} expired")
-    if _today(now) > date.fromisoformat(decl.retention_until):
-        # Phase 4 records this as a violation (rule 2).
+    if now > retention_deadline(decl.retention_until):
+        # Violation rule 2: main.release records it before refusing.
         raise Refusal(403, "retention_passed",
-                      f"retention period ended {decl.retention_until}; the service promised to delete this data")
+                      f"retention period ended {decl.retention_until}; the service promised to delete this data",
+                      rule=AFTER_RETENTION)
 
 
 def store(decl: Declaration):

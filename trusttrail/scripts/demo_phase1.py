@@ -5,8 +5,9 @@
 from app import settings
 from app.demo_login import PERSONAL_CLAIMS, claims, login, release
 from app.demo_service import DemoService
+from app.keycloak import KeycloakAdmin
 
-SERVICES = settings.services()
+SERVICES = {k: v for k, v in settings.services().items() if not v.get("scripted")}  # the 3 test services
 STUDENTS = [s["username"] for s in settings.load("students")["students"]]
 
 
@@ -32,16 +33,16 @@ def main():
         print(f"{sid:8} profile={body['profile']:9} personal claims in Keycloak tokens: {sorted(leaked) or 'none'}")
         print(f"{'':8} released by TrustTrail: {body['released']}")
 
-    section("3. Tier cap: each service asks for every profile")
+    section("3. Tier cap: profiles each service may request (assigned scopes in Keycloak)")
+    # Read, not probed: since Phase 4, asking for a profile above the cap is a
+    # recorded violation. scripts.bad_services tiercap shows Keycloak refusing it.
+    kc = KeycloakAdmin()
     order = settings.profiles()["order"]
     print(f"{'service':8} {'tier':14} " + " ".join(f"{p:14}" for p in order))
     for sid, svc in SERVICES.items():
-        cells = []
-        for p in order:
-            r = login(sid, "asha", p)
-            cells.append("granted" if r.status_code == 200 else r.json().get("error", r.status_code))
+        assigned = kc.optional_scopes(kc.client(sid)["id"])
+        cells = ["assigned" if f"profile-{p}" in assigned else "not assigned" for p in order]
         print(f"{sid:8} {svc['tier']:14} " + " ".join(f"{c:14}" for c in cells))
-
 
 if __name__ == "__main__":
     main()

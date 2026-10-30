@@ -1,5 +1,9 @@
 """The hash-chained, tamper-evident release ledger.
 
+Entry kinds: "release" (attributes went to a service), "violation" (a refused
+request that broke one of the three rules, Phase 4) and "trust_reset" (an
+administrator restored a service's trust; earlier violations stop counting).
+
 Each entry's hash covers all of its fields plus the previous entry's hash, so
 changing, deleting or reordering any entry breaks every link after it. What the
 chain alone cannot catch: an attacker who rewrites the chain from the edited
@@ -17,9 +21,10 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 GENESIS = "0" * 64
-HASHED_FIELDS = ["entry_id", "kind", "time", "service_id", "student_pseudonym", "profile",
-                 "attributes_released", "purpose", "retention_until", "declaration_id",
-                 "service_signature", "prev_hash"]
+HASHED_FIELDS = ["entry_id", "kind", "rule", "time", "service_id", "student_pseudonym", "profile",
+                 "attributes_requested", "attributes_released", "purpose", "retention_until",
+                 "declaration_id", "service_signature", "prev_hash"]
+LIST_FIELDS = ("attributes_requested", "attributes_released")
 
 
 def canonical(entry: dict) -> bytes:
@@ -39,22 +44,27 @@ def _now_iso() -> str:
 
 def _row(r: sqlite3.Row) -> dict:
     entry = dict(r)
-    entry["attributes_released"] = json.loads(entry["attributes_released"])
+    for k in LIST_FIELDS:
+        entry[k] = json.loads(entry[k])
     return entry
 
 
 def append(conn: sqlite3.Connection, fields: dict) -> dict:
     """Add one entry. Call inside a single transaction so id and prev_hash can't race."""
     last = conn.execute("SELECT entry_id, entry_hash FROM ledger ORDER BY entry_id DESC LIMIT 1").fetchone()
-    entry = {"entry_id": last["entry_id"] + 1 if last else 1,
+    defaults = {"rule": "", "student_pseudonym": "", "profile": "", "purpose": "", "retention_until": "",
+                "declaration_id": "", "service_signature": "", "attributes_released": []}
+    entry = {**defaults, **{k: v for k, v in fields.items() if k != "time"},
+             "entry_id": last["entry_id"] + 1 if last else 1,
              "prev_hash": last["entry_hash"] if last else GENESIS,
-             "time": fields.get("time") or _now_iso(),
-             **{k: v for k, v in fields.items() if k != "time"}}
-    entry["attributes_released"] = sorted(entry["attributes_released"])
+             "time": fields.get("time") or _now_iso()}
+    entry.setdefault("attributes_requested", entry["attributes_released"])
+    for k in LIST_FIELDS:
+        entry[k] = sorted(entry[k])
     entry["entry_hash"] = compute_hash(entry)
     conn.execute(f"INSERT INTO ledger ({', '.join(HASHED_FIELDS)}, entry_hash) "
                  f"VALUES ({', '.join('?' * (len(HASHED_FIELDS) + 1))})",
-                 [json.dumps(entry[k]) if k == "attributes_released" else entry[k] for k in HASHED_FIELDS]
+                 [json.dumps(entry[k]) if k in LIST_FIELDS else entry[k] for k in HASHED_FIELDS]
                  + [entry["entry_hash"]])
     return entry
 
@@ -75,6 +85,15 @@ def entries_for(conn: sqlite3.Connection, pseudonyms: dict[str, str]) -> list[di
     where = " OR ".join("(service_id = ? AND student_pseudonym = ?)" for _ in pseudonyms)
     params = [x for pair in pseudonyms.items() for x in pair]
     return [_row(r) for r in conn.execute(f"SELECT * FROM ledger WHERE {where} ORDER BY entry_id DESC", params)]
+
+
+def violations_since(conn: sqlite3.Connection, service_id: str, since_iso: str) -> list[dict]:
+    """Violations that still count: after `since_iso` and after the latest trust reset."""
+    reset = conn.execute("SELECT MAX(entry_id) AS id FROM ledger WHERE kind = 'trust_reset' AND service_id = ?",
+                         (service_id,)).fetchone()["id"] or 0
+    rows = conn.execute("SELECT * FROM ledger WHERE kind = 'violation' AND service_id = ? "
+                        "AND entry_id > ? AND time >= ? ORDER BY entry_id", (service_id, reset, since_iso))
+    return [_row(r) for r in rows]
 
 
 def store_receipt(conn: sqlite3.Connection, entry_id: int, jws: str):

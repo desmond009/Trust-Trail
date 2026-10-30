@@ -28,6 +28,9 @@ needs internet). TrustTrail and service code is mounted into the containers, so 
 scripts and tests apply without rebuilding; restart a container after changing app code.
 
 Students: `asha`, `rohan`, `meera`, `kabir`, `zoya`, password from `STUDENT_DEMO_PASSWORD`.
+
+**Upgrading from an earlier phase:** Phase 4 changed the ledger entry format, so old demo data
+won't verify. Reset with `docker compose down -v`, then run the three commands above again.
 `*.localhost` resolves to your machine in Chrome, Firefox and curl without any hosts-file change.
 
 ## Phase 1: profiles and per-service pseudonyms
@@ -186,9 +189,12 @@ never values), `subject` (only if the pseudonym was released), `purpose`, `reten
 | `replayed_nonce` | 409 | nonce reused by the same service |
 | `no_declaration` | 403 | release without a declaration, or with another service's |
 | `declaration_expired` | 403 | the declaration's `exp` has passed |
-| `retention_passed` | 403 | release after the promised deletion date *(becomes violation rule 2 in Phase 4)* |
-| `attribute_not_declared` | 403 | asks for an attribute the purpose doesn't cover *(rule 1)* |
-| `attribute_above_profile` | 403 | asks for more than the Keycloak-granted profile allows *(rule 3)* |
+| `retention_passed` | 403 | release after the promised deletion time: **violation rule 2** |
+| `attribute_not_declared` | 403 | asks for an attribute the purpose doesn't cover: **violation rule 1** |
+| `attribute_above_tier_cap` | 403 | asks for an attribute above the service's tier cap: **violation rule 3** |
+| `attribute_above_profile` | 403 | asks for more than the granted profile, but within its agreement (not a violation) |
+
+Since Phase 4, the three rule-breaking refusals also return `"violation": {"rule": ..., "entry_id": ...}`.
 
 ### Demo and tests
 
@@ -208,7 +214,8 @@ registration with the wrong token, private key material, and receipt verificatio
 ## Phase 3: hash-chained ledger and student dashboard
 
 Every successful `/release` now writes one ledger entry and a TrustTrail-signed receipt, in
-the same transaction. Refused requests write nothing (Phase 4 records them as violations).
+the same transaction. Refused requests never write a release; since Phase 4, the three
+rule-breaking refusals write a `violation` entry instead.
 
 **Entry format** (table `ledger` in `/data/trusttrail.db`):
 
@@ -284,6 +291,107 @@ exactly one matching entry, the receipt points at it, a refusal writes nothing, 
 check matches the ledger, 10 concurrent releases keep the chain intact, and the dashboard API
 needs login.
 
+## Phase 4: violations, trust score and tier caps
+
+The loop: **signed promise → ledger record → violation detected → trust lowered → less data released.**
+
+### The three violation rules (only what TrustTrail can see)
+
+| Rule | Detected where | Refusal code |
+|---|---|---|
+| 1 · `undeclared_attribute`: asks for an attribute its signed declaration doesn't cover | `/release` | `attribute_not_declared` |
+| 2 · `after_retention`: asks again, under a declaration whose `retention_until` has passed | `/release` | `retention_passed` |
+| 3 · `above_tier_cap`: asks for more than its tier cap allows | `/release` (attributes), **and Keycloak login** (profile scope) | `attribute_above_tier_cap` / Keycloak `invalid_scope` |
+
+Each rule break is written to the ledger as a `violation` entry (nothing released;
+`attributes_requested` shows what was asked for) and returned to the service in the refusal.
+Rule 3 at login is refused by Keycloak itself, because the scope isn't assigned. TrustTrail learns of it
+by reading Keycloak's `LOGIN_ERROR` events ("Invalid scopes: … profile-total") every
+`sync_seconds`. Events are switched on for that event type only and kept for one day.
+
+**"Tier cap" means the cap from the service's agreement** (its base tier in
+`config/services.yaml`). A demoted service that still asks for what its agreement allowed is
+refused, but not counted again; otherwise one violation would snowball into automatic blocking.
+`retention_until` may be a date (end of that day, UTC) or a timestamp with a timezone; the
+retention violator uses a timestamp a few seconds ahead so the demo doesn't wait a day.
+
+### Score and tiers (`config/trust.yaml`; all values are starting points to tune)
+
+```
+score = 100 − 15 (no privacy policy URL) − 10 (registration metadata incomplete) − 25 × violations
+tier  = base tier, moved down one step for every full 25 points below 100; floor: blocked
+```
+- **Inputs:** privacy policy declared (Keycloak client `policyUri`); registration metadata
+  complete (`name`, `description`, `rootUrl`, `tosUri`); violations in the ledger from the last
+  90 days, after the most recent trust reset.
+- **Tiers and caps:** fully_trusted → total, semi_trusted → partial, untrusted → pseudonym,
+  blocked → anonymous. With these numbers, one violation drops exactly one tier.
+- **Enforcement:** TrustTrail adds or removes the `profile-*` optional client scopes on the client
+  through the Admin REST API, so **Keycloak itself** refuses higher profiles from then on.
+  `/release` also applies the current cap to tokens issued before the demotion. A background
+  sync re-applies every cap every few seconds, so re-seeding Keycloak can't silently undo a
+  demotion.
+- **Reset:** `POST /trust/{service}/reset` (admin token) writes a `trust_reset` entry. Earlier
+  violations stay in the ledger but stop counting, so restoring a service is itself auditable.
+
+| Endpoint | |
+|---|---|
+| `GET /trust` | public: score, inputs, tier and cap for every service |
+| `POST /trust/sync` | admin: read Keycloak events and re-apply caps now |
+| `POST /trust/{service}/reset` | admin: restore after review; body `{"reason": "..."}` |
+
+Admin endpoints need `Authorization: Bearer $TRUSTTRAIL_ADMIN_TOKEN`. TrustTrail's Keycloak
+service account now also has `view-events` and `manage-clients`.
+
+### Bad services
+
+Three scripted clients in `config/services.yaml` (no web app). Each uses Authlib's ordinary
+OAuth2 client and signs an honest-looking declaration, then misbehaves in one way:
+
+| Service | Base tier | Misbehaviour |
+|---|---|---|
+| Campus Deals (`overasker`) | semi_trusted | declares `[sub, affiliation]`, then asks for department and email |
+| Alumni Tracker (`retainer`) | semi_trusted, **no privacy policy** (score starts at 85) | promises deletion in 2 s, comes back after |
+| Career Portal (`tiercap`) | untrusted | asks Keycloak for `profile-total` |
+
+```bash
+docker compose exec trusttrail python -m scripts.bad_services overasker 3   # misbehave 3 times
+curl localhost:8000/trust                                                   # watch score, tier, cap
+docker compose exec trusttrail python -m scripts.demo_phase4               # detection table below
+```
+Students see refused requests about them on the dashboard as red rows.
+
+### Detection counts (from `demo_phase4`, 5 attempts each)
+
+| Service | Misbehaviour | Rule | Attempts | Detected | Missed | Score | Tier after each attempt | Max profile |
+|---|---|---|---|---|---|---|---|---|
+| Campus Deals | asks for attributes its declaration doesn't cover | 1 | 5 | 5 | 0 | 100 → 0 | semi_trusted → untrusted → blocked → blocked → blocked → blocked | partial → anonymous |
+| Alumni Tracker | requests again after its promised deletion time | 2 | 5 | 5 | 0 | 85 → 0 | semi_trusted → untrusted → blocked → blocked → blocked → blocked | partial → anonymous |
+| Career Portal | asks Keycloak for a profile above its tier cap | 3 | 5 | 5 | 0 | 100 → 0 | untrusted → blocked → blocked → blocked → blocked → blocked | pseudonym → anonymous |
+
+| Honest services | Releases | Violations (false positives) | Tier changes |
+|---|---|---|---|
+| Digital Library, Learning System, Examination Portal | 30 | 0 | 0 |
+
+These are scripted clients: the counts show the rules fire as designed. They don't measure
+how often real services misbehave or how often the rules would miss a subtler misuse.
+
+### Tests
+
+- `tests/test_trust.py` (unit): each score input, one tier per violation, the score floor, the
+  tier floor, and caps.
+- `tests/test_release.py`: which refusals are violations (rules 1 and 3), and which aren't
+  (above the granted profile; above a lowered cap).
+- `tests/test_declarations.py`: timestamp retention and rule 2.
+- `tests/test_ledger.py`: violations count only after the latest reset.
+- `tests/test_phase4_integration.py`, for each bad service: the violation is caught with the
+  right rule, the score drops by one step, the tier and maximum profile drop by one, the scope
+  is removed in Keycloak, and Keycloak refuses the old profile. Also covered: the cascade down
+  to anonymous (where a release is just `affiliation`), no double counting after demotion, old
+  tokens capped, zero violations from honest traffic, reset, and admin auth.
+- `tests/conftest.py` resets trust before each integration test (recorded), so tests that
+  break rules on purpose don't leak into each other.
+
 ## Known limits (Phase 1)
 
 - **Why `sid` is stripped, and what that costs.** Keycloak 26 adds the SSO session ID (`sid`)
@@ -331,3 +439,22 @@ needs login.
 - **The dashboard's Verify uses the receipt stored by TrustTrail.** An attacker who also
   rewrote the receipts table would pass that check. Receipts the student downloaded earlier
   are independent evidence (check them against the ledger entry, as the receipt file explains).
+
+## Known limits (Phase 4)
+
+- **The trust score is a heuristic.** The weights are hand-picked and were tested only with
+  simulated clients. It ranks services by behaviour TrustTrail can see; it is not a measure of
+  how trustworthy a service really is.
+- **Only visible misbehaviour counts.** A service that stays inside its declaration but
+  misuses the data afterwards, or never deletes it, gets a perfect score. Deletion cannot be proven.
+- **Rule 2 only sees re-requests.** It catches a service that comes back after its deletion
+  date, not one that quietly keeps what it already has.
+- **Rule 3 at login depends on Keycloak's event log.** If events are switched off or expire
+  before the next sync (every 3 s here, events kept for 1 day), those attempts are refused but
+  not counted.
+- **`manage-clients` is a broad Keycloak role.** TrustTrail could change any client, not just
+  the scopes it needs to. Keycloak's fine-grained admin permissions could narrow this; not done here.
+- **Resets are trusted.** Whoever holds the admin token can forgive a service. The reset is
+  recorded in the ledger, but nothing stops it.
+- Authlib 1.9 marks its httpx integration as deprecated in favour of `httpx2`. It works today;
+  the bad-service scripts hide the notice.

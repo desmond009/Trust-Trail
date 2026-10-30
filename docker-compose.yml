@@ -30,17 +30,43 @@ services:
       timeout: 5s
       retries: 40
 
+  # Local Ethereum chain for anchoring (Hardhat 3). In-memory: a restart gives
+  # a fresh chain, chain-deploy redeploys, and TrustTrail re-anchors from entry 1.
+  chain:
+    build: ./chain
+    ports: ["8545:8545"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}'}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  chain-deploy:
+    build: ./chain
+    command: ["npx", "hardhat", "run", "scripts/deploy.ts", "--network", "chainNode"]
+    environment: {CHAIN_RPC_URL: "http://chain:8545"}
+    volumes: ["./chain/deployments:/app/deployments"]
+    depends_on:
+      chain: {condition: service_healthy}
+    restart: "no"
+
   trusttrail:
     build: ./trusttrail
     env_file: .env
     environment:
       KC_INTERNAL_URL: http://keycloak:8080
       KC_PUBLIC_URL: http://localhost:8080
+      # Anchoring target. Defaults: local Hardhat chain. For Sepolia set these in .env (see README).
+      CHAIN_RPC_URL: ${CHAIN_RPC_URL:-http://chain:8545}
+      ANCHOR_DEPLOYMENT: /deployments/${ANCHOR_NETWORK:-localhost}.json
+      ANCHOR_PRIVATE_KEY: ${ANCHOR_PRIVATE_KEY}
+      ANCHOR_INTERVAL_SECONDS: ${ANCHOR_INTERVAL_SECONDS:-}
     ports: ["8000:8000"]
     # Code mounted so edits to scripts/tests apply without a rebuild.
-    volumes: ["./trusttrail:/app", "./config:/config:ro", "tt-data:/data"]
+    volumes: ["./trusttrail:/app", "./config:/config:ro", "tt-data:/data", "./chain/deployments:/deployments:ro"]
     depends_on:
       keycloak: {condition: service_healthy}
+      chain-deploy: {condition: service_completed_successfully}
 
   library:
     <<: *service-app

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import dashboard, db, declarations, ledger, receipts, service_keys, settings
+from . import anchoring, dashboard, db, declarations, ledger, receipts, service_keys, settings
 from . import release as rel
 from .errors import Refusal
 from .keycloak import KeycloakAdmin
@@ -21,18 +21,20 @@ logging.getLogger("httpx").setLevel(logging.WARNING)   # the trust poller calls 
 kc = KeycloakAdmin()
 pmap = PseudonymMap(kc)
 trust = Trust(kc)
+anchorer = anchoring.Anchorer()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    trust.start()   # background: read Keycloak login errors, re-apply scope caps
+    trust.start()      # background: read Keycloak login errors, re-apply scope caps
+    anchorer.start()   # background: anchor a Merkle root of new entries every interval
     yield
 
 
 app = FastAPI(title="TrustTrail", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"],
                    session_cookie="tt_dashboard", same_site="lax")
-app.include_router(dashboard.router(kc, pmap))
+app.include_router(dashboard.router(kc, pmap, anchorer))
 
 
 @app.exception_handler(Refusal)
@@ -174,6 +176,58 @@ def verify_ledger():
     with db.tx() as conn:
         entries = ledger.all_entries(conn)
     return ledger.verify(entries).as_dict()
+
+
+@app.get("/ledger/proof/{entry_id}")
+def ledger_proof(entry_id: int):
+    """Public Merkle proof for one entry: sibling hashes only, never other entries' content."""
+    try:
+        return anchorer.proof(entry_id)
+    except anchoring.AnchorUnavailable as e:
+        raise Refusal(503, "anchoring_unavailable", str(e))
+
+
+@app.get("/anchors")
+def anchors():
+    """Public: the batches anchored on-chain (read from the contract) and where to find them."""
+    try:
+        dep = anchorer.deployment()
+        batches = anchorer.on_chain_batches()
+    except anchoring.AnchorUnavailable as e:
+        raise Refusal(503, "anchoring_unavailable", str(e))
+    with db.tx() as conn:
+        local = {r["batch_id"]: dict(r) for r in conn.execute(
+            "SELECT * FROM anchors WHERE deployment = ?", (dep["deployedAt"],))}
+    return {"network": dep["network"], "chain_id": dep["chainId"], "contract": dep["address"],
+            "interval_seconds": anchoring.rules()["interval_seconds"],
+            "batches": [b | {k: local.get(b["batch_id"], {}).get(k) for k in ("tx_hash", "block_number", "gas_used")}
+                        for b in batches]}
+
+
+@app.post("/anchors/run")
+def anchors_run(authorization: str | None = Header(None)):
+    """Admin: anchor now instead of waiting for the interval (demos and tests)."""
+    _admin(authorization)
+    try:
+        return {"batch": anchorer.run_once()}
+    except anchoring.AnchorUnavailable as e:
+        raise Refusal(503, "anchoring_unavailable", str(e))
+
+
+@app.get("/anchors/verify")
+def anchors_verify():
+    """Public: recompute every anchored batch's root from the ledger content and compare with the chain."""
+    try:
+        batches = anchorer.on_chain_batches()
+    except anchoring.AnchorUnavailable as e:
+        raise Refusal(503, "anchoring_unavailable", str(e))
+    with db.tx() as conn:
+        entries = ledger.all_entries(conn)
+    results = anchoring.verify_ledger_against_chain(entries, batches)
+    last = batches[-1]["last_entry_id"] if batches else 0
+    return {"ok": all(r["ok"] for r in results), "batches_checked": len(results),
+            "anchored_up_to": last, "unanchored_entries": max(0, (entries[-1]["entry_id"] if entries else 0) - last),
+            "failures": [{"batch_id": r["batch_id"], "reason": r["reason"]} for r in results if not r["ok"]]}
 
 
 @app.get("/trust")

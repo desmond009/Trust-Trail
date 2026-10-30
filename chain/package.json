@@ -1,0 +1,24 @@
+{
+  "name": "trusttrail-chain",
+  "private": true,
+  "version": "1.0.0",
+  "description": "TrustTrail anchor contract: Merkle roots of ledger batches, no personal data",
+  "type": "module",
+  "scripts": {
+    "node": "hardhat node --hostname 0.0.0.0",
+    "test": "hardhat test",
+    "deploy:local": "hardhat run scripts/deploy.ts --network chainNode",
+    "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "4.0.0",
+    "@types/chai": "5.2.3",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.19.1",
+    "chai": "6.2.2",
+    "ethers": "6.16.0",
+    "hardhat": "3.20.0",
+    "mocha": "12.0.3",
+    "typescript": "5.9.3"
+  }
+}

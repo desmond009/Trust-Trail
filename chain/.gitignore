@@ -1,0 +1,6 @@
+node_modules/
+artifacts/
+cache/
+types/
+# Generated on every `docker compose up` for the throwaway local chain.
+deployments/localhost.json

@@ -26,16 +26,26 @@ login_via http://library.localhost:8001/login library
 login_via http://lms.localhost:8002/login lms
 login_via http://localhost:8000/dashboard/login dashboard
 
+# Anchor now (admin) so the newest release is on-chain before we verify it.
+ADMIN_TOKEN=$(grep '^TRUSTTRAIL_ADMIN_TOKEN=' "$(dirname "$0")/../.env" | cut -d= -f2-)
+curl -s --max-time 120 -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8000/anchors/run >/dev/null
+
 releases=$(c http://localhost:8000/dashboard/api/releases)
 newest=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["releases"][0]["entry_id"])' "$releases")
 verify=$(c "http://localhost:8000/dashboard/api/verify/$newest")
 receipt=$(c "http://localhost:8000/dashboard/receipts/$newest")
 other=$(c -o /dev/null -w '%{http_code}' "http://localhost:8000/dashboard/receipts/999999")
+# The downloaded receipt, checked with only the file and the chain (no TrustTrail API or DB).
+standalone=$(cd "$(dirname "$0")/.." && echo "$receipt" | docker compose exec -T trusttrail python -m scripts.verify_receipt - 2>&1) \
+  && standalone_ok=1 || standalone_ok=0
 
-python3 - "$releases" "$verify" "$receipt" "$other" "$newest" <<'PY'
+echo "===== standalone receipt check (file + chain only) ====="
+echo "$standalone"
+
+python3 - "$releases" "$verify" "$receipt" "$other" "$newest" "$standalone_ok" <<'PY'
 import json, sys
 releases, verify, receipt = (json.loads(x) for x in sys.argv[1:4])
-other, newest = sys.argv[4], int(sys.argv[5])
+other, newest, standalone_ok = sys.argv[4], int(sys.argv[5]), sys.argv[6] == "1"
 
 print("===== dashboard: newest releases =====")
 print("student:", releases["student"])
@@ -51,6 +61,8 @@ checks = {
         bool(receipt["receipt_jws"]) and receipt["ledger_entry"]["entry_id"] == newest
         and bool(receipt["service_declaration_jws"]),
     "an entry that is not yours returns 404": other == "404",
+    f"verify button: entry #{newest} matches the blockchain anchor": verify["anchor"]["status"] == "anchored",
+    "downloaded receipt verifies against the chain without TrustTrail": standalone_ok,
 }
 for name, ok in checks.items():
     print(("PASS  " if ok else "FAIL  ") + name)

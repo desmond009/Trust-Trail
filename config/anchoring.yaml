@@ -1,0 +1,6 @@
+# Blockchain anchoring of the ledger (Phase 5). Only Merkle roots of entry
+# hashes go on-chain, never personal data.
+interval_seconds: 300        # build and anchor a batch every 5 minutes (demo default);
+                             # ANCHOR_INTERVAL_SECONDS in .env overrides it
+max_batch_entries: 5000      # larger backlogs are anchored over several batches
+receipt_timeout_seconds: 180 # how long to wait for the transaction to be mined (Sepolia: ~12 s/block)

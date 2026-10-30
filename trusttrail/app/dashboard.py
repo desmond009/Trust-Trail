@@ -19,7 +19,7 @@ PUBLIC_URL = os.environ.get("TT_PUBLIC_URL", "http://localhost:8000")
 PAGE = Path(__file__).parent / "static" / "dashboard.html"
 
 
-def router(kc, pmap) -> APIRouter:
+def router(kc, pmap, anchorer) -> APIRouter:
     r = APIRouter(prefix="/dashboard")
     oauth = OAuth()
     oauth.register(
@@ -105,8 +105,11 @@ def router(kc, pmap) -> APIRouter:
         if entry["kind"] == "release":   # refused requests have no receipt
             checks["receipt signed by TrustTrail"] = receipt_sig
             checks["receipt matches this ledger entry"] = receipt_match
+        anchor = anchorer.verify_entry(entry)
+        if anchor["status"] in ("anchored", "mismatch"):
+            checks[f"matches the blockchain anchor (batch #{anchor['batch_id']})"] = anchor["status"] == "anchored"
         return {"entry_id": entry_id, "ok": all(checks.values()), "checks": checks,
-                "whole_ledger": chain.as_dict(), "anchor": "not available yet (Phase 5)"}
+                "whole_ledger": chain.as_dict(), "anchor": anchor}
 
     def bundle(entry: dict, jws: str | None) -> dict:
         # Called outside db.tx(): declarations.get() takes the same (non-reentrant) lock.
@@ -114,10 +117,20 @@ def router(kc, pmap) -> APIRouter:
         return {
             "about": "TrustTrail release receipt. Verify receipt_jws with trusttrail_jwks (ES256); "
                      "its entry_hash must equal SHA-256 of the canonical JSON of ledger_entry "
-                     "(all fields except entry_hash, sorted keys, no spaces).",
+                     "(all fields except entry_hash, sorted keys, no spaces). If anchor_proof.anchored, "
+                     "the Merkle proof leads from that hash to the root stored on-chain. "
+                     "Check it yourself: python -m scripts.verify_receipt <this file>",
             "receipt_jws": jws, "receipt_payload": receipts.verify(jws) if jws else None,
             "trusttrail_jwks": receipts.jwks(), "ledger_entry": entry,
-            "service_declaration_jws": decl.jws if decl else None}
+            "service_declaration_jws": decl.jws if decl else None,
+            # Merkle proof + where the root is on-chain, if this entry is anchored yet.
+            "anchor_proof": anchor_proof(entry["entry_id"])}
+
+    def anchor_proof(entry_id: int) -> dict:
+        try:
+            return anchorer.proof(entry_id)
+        except Exception as e:   # chain down: the receipt is still valid evidence without it
+            return {"entry_id": entry_id, "anchored": False, "error": str(e)}
 
     @r.get("/receipts/{entry_id}")
     def download_receipt(entry_id: int, request: Request):

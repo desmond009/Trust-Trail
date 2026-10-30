@@ -19,9 +19,13 @@ docker compose run --rm trusttrail python -m scripts.seed    # creates/RESETS th
 | Keycloak admin console | http://localhost:8080 (credentials in `.env`) |
 | TrustTrail API | http://localhost:8000/docs |
 | Student dashboard | http://localhost:8000/dashboard |
+| Local chain (Hardhat) | http://localhost:8545 (JSON-RPC) |
 | Digital Library | http://library.localhost:8001 |
 | Learning System | http://lms.localhost:8002 |
 | Examination Portal | http://exam.localhost:8003 |
+
+`docker compose up` also starts a local Hardhat chain and deploys the anchor contract
+(`chain-deploy`), which writes `chain/deployments/localhost.json`.
 
 The first build compiles the custom Keycloak mapper with Maven inside Docker (a few minutes,
 needs internet). TrustTrail and service code is mounted into the containers, so edits to
@@ -392,6 +396,142 @@ how often real services misbehave or how often the rules would miss a subtler mi
 - `tests/conftest.py` resets trust before each integration test (recorded), so tests that
   break rules on purpose don't leak into each other.
 
+## Phase 5: blockchain anchoring
+
+Records stay off-chain; fingerprints are anchored on-chain. Every `interval_seconds` (300 by
+default, `config/anchoring.yaml` or `ANCHOR_INTERVAL_SECONDS`), TrustTrail takes the ledger
+entries added since the last anchor (releases, violations and resets alike). It builds a Merkle
+tree over their entry hashes and stores the root in the `TrustTrailAnchor` contract. No
+transaction is sent when nothing is new. **Only hashes go on-chain, never personal data.**
+
+**Contract** (`chain/contracts/TrustTrailAnchor.sol`): `anchor(root, firstEntryId, lastEntryId)`,
+owner-only, stores `{root, firstEntryId, lastEntryId, anchoredAt}` per batch id and emits
+`Anchored`. Batches must be **contiguous from entry 1** (no gaps, no overlaps), so anyone can
+see exactly which entries are anchored, and a ledger that ends early is caught. There is no
+function to change or delete a batch.
+
+**Merkle tree** (`app/merkle.py`), using RFC 6962 conventions:
+`leaf = SHA-256(0x00 ‖ entry_hash)` and `node = SHA-256(0x01 ‖ left ‖ right)`. An odd node is
+promoted, not duplicated. Verification recomputes each leaf from the entry's **content**, so an
+edited entry whose stored hash was left alone is caught too.
+
+**Endpoints**
+
+| | |
+|---|---|
+| `GET /ledger/proof/{entry_id}` | public Merkle proof: entry hash, sibling hashes, batch, contract, chain. No other entry's content. `anchored: false` until the next batch |
+| `GET /anchors` | public: batches read from the contract, plus tx hash, block and gas |
+| `GET /anchors/verify` | public: recompute every anchored root from the ledger and compare with the chain |
+| `POST /anchors/run` | admin: anchor now instead of waiting (demos, tests) |
+
+**Dashboard:** Verify now also checks "matches the blockchain anchor (batch #n)", recomputing
+the root from the entry and its proof and reading the root from the contract. The downloaded
+receipt includes the Merkle proof. `scripts/verify_receipt.py` checks a downloaded receipt
+using **only the file and the chain**, with no TrustTrail API or database:
+
+```bash
+docker compose exec -T trusttrail python -m scripts.verify_receipt - < trusttrail-receipt-12.json
+# PASS  receipt signature valid
+# PASS  ledger entry matches the receipt
+# PASS  Merkle proof computed
+# PASS  on-chain root matches          batch #6 at 0x5FbDB231… on chain 31337
+```
+
+**Scripts**
+
+```bash
+docker compose exec trusttrail python -m scripts.verify_anchors   # every batch: on-chain root vs root recomputed from the ledger
+docker compose exec trusttrail python -m scripts.demo_phase5      # delay entry -> anchor, gas per anchor (table)
+docker compose exec trusttrail python -m scripts.demo_tamper      # now with a "Blockchain anchor" column
+docker compose run --rm chain-deploy npx hardhat test             # contract tests (Hardhat 3, mocha + ethers)
+```
+
+### Measurements (local Hardhat chain)
+
+`demo_phase5 --batches 3 --interval 12` (a release about every 2 s):
+
+| Batch | Entries | Gas used | Gas per entry | Delay min (s) | Delay median (s) | Delay max (s) | Tx confirmed in (s) |
+|---|---|---|---|---|---|---|---|
+| 13 | 6 | 77244 | 12874 | 1.1 | 7.3 | 12.1 | 0.03 |
+| 14 | 6 | 77244 | 12874 | 1.4 | 6.4 | 12.2 | 0.05 |
+| 15 | 6 | 77244 | 12874 | 1.1 | 7.2 | 12.9 | 0.03 |
+
+Over 18 entries: median delay 6.8 s, p95 12.2 s, max 12.9 s. Delay is measured from the entry's
+time to when the anchor transaction was confirmed, both on the same clock. Hardhat's block
+timestamps run a few seconds ahead after many quick blocks (each block must be at least 1 s
+after the previous one), so they are not used for timing.
+
+- **Gas per anchor:** 91,659 for the first batch on a new contract (it initialises storage),
+  then about 77,240 for every later one, **whatever the batch size**. The contract test anchors
+  a 100,000-entry range for 77,268. Deployment costs 361,072 gas.
+- **Delay** from an entry to its anchor is about half the interval on average and at most one
+  interval plus block time. With the default 300 s that means a median of about 150 s and a
+  worst case of about 300 s plus ~12 s on Sepolia. Run `demo_phase5` with your own interval
+  to measure it.
+- **Cost on a public chain** = gas × gas price per *batch*, not per entry. Example: 77,240 gas
+  at 1 gwei = 0.000077 ETH per anchor; a busy day at a 5-minute interval (288 anchors) is about
+  0.022 ETH. Gas prices vary; quiet periods send no transactions.
+
+Tamper demo with anchoring (all entries up to #133 anchored, #134 made afterwards):
+
+| Attack | Chain check | Student receipts | Blockchain anchor |
+|---|---|---|---|
+| A. change an entry, leave its hash | detected | 1 fails | **detected** |
+| B. change an entry, recompute its hash | detected | 1 fails | **detected** |
+| C. delete an entry | detected | 1 fails | **detected** |
+| D. change an entry, recompute every hash after it | not detected | 39 fail | **detected** |
+| E. cut off the tail | not detected | 2 fail | **detected** |
+| F. change the entry made after the last anchor | not detected | 1 fails | not detected |
+
+F is the anchoring window: an entry is protected by the anchor only once its batch is mined.
+
+### Tests
+
+- **Contract** (`chain/test/TrustTrailAnchor.ts`, 6 tests): stores and emits; contiguity (gap,
+  overlap, wrong start); empty range; owner-only; no function can change a batch; gas doesn't
+  grow with batch size.
+- **`tests/test_merkle.py`**: proofs verify for every leaf at sizes 1–33; a tampered leaf or
+  sibling fails; leaf and node hashes are domain-separated; duplicating the last leaf changes
+  the root; an empty batch is rejected.
+- **`tests/test_anchoring.py`**: a full rewrite, an edit that leaves the stored hash alone, and
+  truncation are all caught; only the affected batch fails.
+- **`tests/test_phase5_integration.py`** (local chain): batches are contiguous and cover the
+  ledger; nothing new means no transaction; new entries stay pending until the next batch; a
+  proof reaches the on-chain root and reveals only hashes; the whole ledger verifies; the
+  standalone receipt check passes and catches an edited entry; admin auth.
+- **`scripts/check_dashboard.sh`** now also checks the dashboard's blockchain verification and
+  runs `verify_receipt` on a receipt downloaded through the dashboard.
+
+### Local chain lifecycle
+
+The local Hardhat chain is in memory. `chain-deploy` reuses the existing contract if it's still
+on the chain, and deploys a new one only on a fresh chain (for example after `docker compose
+down` or restarting `chain`). TrustTrail then anchors from entry 1 again into the new contract;
+proofs show "pending" until it has. On Sepolia the contract and its history persist.
+
+### Switching to Sepolia
+
+You need a Sepolia RPC URL (e.g. from Alchemy or Infura) and a key holding some Sepolia ETH
+(faucets often require a small mainnet balance). The same key deploys the contract and anchors
+(it is the contract owner). Keep both in `.env`, never in the repo.
+
+```bash
+# 1. Deploy once; writes chain/deployments/sepolia.json (public info, safe to commit)
+docker compose run --rm -e SEPOLIA_RPC_URL="https://..." -e SEPOLIA_PRIVATE_KEY="0x..." \
+  chain-deploy npx hardhat run scripts/deploy.ts --network sepolia
+
+# 2. In .env:
+#    ANCHOR_NETWORK=sepolia
+#    CHAIN_RPC_URL=https://...        (same RPC URL)
+#    ANCHOR_PRIVATE_KEY=0x...         (same key as the deployer)
+# 3. Restart TrustTrail
+docker compose up -d trusttrail
+curl localhost:8000/anchors          # "network": "sepolia"
+```
+Then check the contract and anchor transactions on a Sepolia block explorer. I rehearsed
+this procedure (steps 1–3, with `--network sepolia`, a separate key and `ANCHOR_NETWORK=sepolia`)
+against the local chain; a real Sepolia run still needs your RPC URL and funded key.
+
 ## Known limits (Phase 1)
 
 - **Why `sid` is stripped, and what that costs.** Keycloak 26 adds the SSO session ID (`sid`)
@@ -458,3 +598,21 @@ how often real services misbehave or how often the rules would miss a subtler mi
   recorded in the ledger, but nothing stops it.
 - Authlib 1.9 marks its httpx integration as deprecated in favour of `httpx2`. It works today;
   the bad-service scripts hide the notice.
+
+## Known limits (Phase 5)
+
+- **An anchor proves "unchanged since the anchor", not "true when written".** If TrustTrail
+  records something false, anchoring faithfully preserves the false record.
+- **There is an anchoring window.** Entries newer than the last batch (up to one interval) are
+  protected only by the hash chain and students' receipts (tamper attack F).
+- **TrustTrail decides what to anchor.** It could leave a release out of the ledger entirely
+  before anchoring; anchoring can't reveal a record that was never written. Receipts held by
+  students are the counter-evidence.
+- **The local chain is a stand-in.** Hardhat runs in memory with public test keys; its anchors
+  prove nothing to outsiders. Only a public chain such as Sepolia (or mainnet) gives evidence
+  independent of TrustTrail. Sepolia is a test network and could in principle be reset.
+- **Key custody:** whoever holds the anchoring key can add batches, but cannot change or remove
+  existing ones.
+- **Library versions:** Hardhat 3.20.0 is pinned (current is 3.21.x, about two weeks newer),
+  with Solidity 0.8.28 and web3.py 7.16.0. web3.py 8.0 exists; we stayed on 7.x, whose API is
+  established.

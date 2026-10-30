@@ -65,13 +65,20 @@ async function ledgerStatus() {
     : el("span", {className: "status fail"}, `✗ Ledger broken at entry ${r.first_bad_entry}: ${r.reason}`));
 }
 
+function anchorText(a) {
+  if (a.status === "anchored")
+    return `Blockchain: root of batch #${a.batch_id} on ${a.network}, block ${a.block_number}, tx ${a.tx_hash.slice(0, 12)}…`;
+  if (a.status === "mismatch") return `Blockchain: this entry does NOT match the root anchored in batch #${a.batch_id}`;
+  return `Blockchain: ${a.detail}`;
+}
+
 async function verify(id, out) {
   out.replaceChildren(el("span", {className: "muted"}, "Verifying…"));
   const r = await fetch(`/dashboard/api/verify/${id}`).then(r => r.json());
   out.replaceChildren(el("ul", {className: "result"},
     Object.entries(r.checks).map(([name, ok]) =>
       el("li", {className: ok ? "pass" : "fail"}, `${ok ? "✓" : "✗"} ${name}`)),
-    el("li", {className: "muted"}, `Blockchain anchor: ${r.anchor}`)));
+    el("li", {className: "muted"}, anchorText(r.anchor))));
 }
 
 async function load() {

@@ -69,6 +69,23 @@ CREATE TABLE IF NOT EXISTS trust_state (
     service_id TEXT PRIMARY KEY,
     state      TEXT NOT NULL           -- JSON: score, inputs, tier, cap, ...
 );
+-- Local record of anchoring transactions (Phase 5). The contract is the source of
+-- truth; this caches tx hash, gas and timing so proofs and stats need no chain scan.
+CREATE TABLE IF NOT EXISTS anchors (
+    deployment       TEXT NOT NULL,     -- deployedAt of the contract deployment: a fresh local
+                                        -- chain reuses the same address, so the address alone is ambiguous
+    contract_address TEXT NOT NULL,
+    chain_id         INTEGER NOT NULL,
+    batch_id         INTEGER NOT NULL,
+    first_entry_id   INTEGER NOT NULL,
+    last_entry_id    INTEGER NOT NULL,
+    root             TEXT NOT NULL,     -- hex
+    tx_hash          TEXT NOT NULL,
+    block_number     INTEGER NOT NULL,
+    gas_used         INTEGER NOT NULL,
+    anchored_at      INTEGER NOT NULL,  -- block timestamp
+    PRIMARY KEY (deployment, batch_id)
+);
 -- Keycloak event IDs already turned into violations (or ignored), so none counts twice.
 CREATE TABLE IF NOT EXISTS processed_events (
     event_id TEXT PRIMARY KEY
@@ -78,6 +95,9 @@ CREATE TABLE IF NOT EXISTS processed_events (
 
 def init(conn: sqlite3.Connection) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'anchors'").fetchone() and \
+            "deployment" not in {r[1] for r in conn.execute("PRAGMA table_info(anchors)")}:
+        conn.execute("DROP TABLE anchors")   # an early Phase 5 cache; the chain is the source of truth
     conn.executescript(SCHEMA)
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(ledger)")}
     if "rule" not in columns:

@@ -14,7 +14,7 @@ import json
 import sqlite3
 import tempfile
 
-from app import db, ledger, receipts
+from app import anchoring, db, ledger, receipts
 from app.demo_login import login, release
 from app.demo_service import DemoService
 
@@ -31,6 +31,11 @@ def ensure_entries(minimum=6):
     for i in range(minimum - have):
         release(login("lms", STUDENTS[i % 5], "partial").json()["access_token"], decl["declaration_id"])
     print(f"(added {minimum - have} releases so there is something to tamper with)")
+
+
+def add_unanchored_release():
+    decl = DemoService("lms").declare()
+    release(login("lms", "asha", "partial").json()["access_token"], decl["declaration_id"])
 
 
 def copy_of_live() -> sqlite3.Connection:
@@ -56,7 +61,7 @@ def rehash_from(conn, start_id):
         prev = e["entry_hash"]
 
 
-def attacks(k: int, last: int):
+def attacks(k: int, last_anchored: int, newest: int):
     def edit(c):
         c.execute("UPDATE ledger SET attributes_released = '[\"sub\"]' WHERE entry_id = ?", (k,))
 
@@ -71,28 +76,38 @@ def attacks(k: int, last: int):
         (f"D. change entry #{k}, recompute every hash after it",
          lambda c: (c.execute("UPDATE ledger SET purpose = 'Advertising partners' WHERE entry_id = ?", (k,)),
                     rehash_from(c, k))),
-        (f"E. delete the newest entry (#{last})", lambda c: c.execute("DELETE FROM ledger WHERE entry_id = ?", (last,))),
+        (f"E. cut off the tail (#{last_anchored} onwards)",
+         lambda c: c.execute("DELETE FROM ledger WHERE entry_id >= ?", (last_anchored,))),
+        (f"F. change entry #{newest} (made after the last anchor), fix its hash",
+         lambda c: (c.execute("UPDATE ledger SET purpose = 'Advertising partners' WHERE entry_id = ?", (newest,)),
+                    rehash_from(c, newest))),
     ]
 
 
 def run_copy_mode(k: int | None):
     ensure_entries()
+    # Anchor everything first, so the blockchain column has something to compare with.
+    anchorer = anchoring.Anchorer()
+    anchorer.run_once()
+    batches = anchorer.on_chain_batches()
+    add_unanchored_release()
     live = db.init(sqlite3.connect(db.DB_PATH))
     entries = ledger.all_entries(live)
     before = ledger.verify(entries)
     if not before.ok:
         raise SystemExit(f"live ledger is already broken at #{before.first_bad_entry}; run --restore first")
     # Evidence kept outside the database: the receipts students downloaded, and
-    # (from Phase 5) the anchored head hash. Captured before the attacks.
+    # the Merkle roots on-chain (read above). Captured before the attacks.
     held_hashes = {e["entry_id"]: receipts.verify(jws)["entry_hash"]
                    for e in entries if (jws := ledger.receipt(live, e["entry_id"]))}
     # Default target: a release in the middle (releases have receipts; violations don't).
     releases = [e["entry_id"] for e in entries if e["kind"] == "release" and e["entry_id"] > 1]
     k = k or releases[len(releases) // 2]
-    print(f"Ledger has {len(entries)} entries, head {before.head_hash[:16]}…; attacking entry #{k}.\n")
+    print(f"Ledger has {len(entries)} entries; 1-{batches[-1]['last_entry_id']} anchored in {len(batches)} "
+          f"on-chain batch(es), #{len(entries)} not yet. Attacking entry #{k}.\n")
 
     rows = []
-    for name, attack in attacks(k, len(entries)):
+    for name, attack in attacks(k, batches[-1]["last_entry_id"], len(entries)):
         c = copy_of_live()
         drop_guards(c)
         attack(c)
@@ -102,19 +117,21 @@ def run_copy_mode(k: int | None):
         broken_receipts = sum(1 for i, h in held_hashes.items()
                               if i not in by_id or ledger.compute_hash(by_id[i]) != h)
         chain = f"DETECTED at #{check.first_bad_entry}" if not check.ok else "not detected"
-        head = ("n/a (chain broken)" if not check.ok else
-                "DETECTED (head changed)" if check.head_hash != before.head_hash else "not detected")
-        rows.append((name, chain, f"{broken_receipts} receipt(s) fail" if broken_receipts else "all match", head))
+        failed = [r for r in anchoring.verify_ledger_against_chain(after, batches) if not r["ok"]]
+        anchor = f"DETECTED (batch #{failed[0]['batch_id']})" if failed else "not detected"
+        rows.append((name, chain, f"{broken_receipts} receipt(s) fail" if broken_receipts else "all match", anchor))
 
-    header = ("Attack", "Chain check", "Student receipts", "Earlier head hash")
+    header = ("Attack", "Chain check", "Student receipts", "Blockchain anchor")
     w = [max(len(r[i]) for r in rows + [header]) for i in range(4)]
     print("  ".join(h.ljust(w[i]) for i, h in enumerate(header)))
     print("  ".join("-" * x for x in w))
     for r in rows:
         print("  ".join(v.ljust(w[i]) for i, v in enumerate(r)))
     print("\nThe live ledger was not modified (each attack ran on a copy).")
-    print("D and E pass the chain check: a consistent rewrite or a cut-off tail can only be caught by\n"
-          "evidence kept outside the database: students' receipts, or the anchored head hash (Phase 5).")
+    print("D and E pass the chain check: a consistent rewrite or a cut-off tail is caught only by\n"
+          "evidence kept outside the database: students' receipts, or the Merkle roots anchored on-chain.\n"
+          "F shows the anchoring window: an entry newer than the last batch is protected only by\n"
+          "receipts until the next anchor (at most one interval later).")
 
 
 def run_live(k: int):

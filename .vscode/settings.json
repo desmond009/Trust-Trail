@@ -1,0 +1,7 @@
+{
+  // Editor only: the code runs in Docker. This venv mirrors the containers' pinned packages
+  // (python3 -m venv .venv && .venv/bin/pip install -r trusttrail/requirements.txt -r services/requirements.txt).
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  // `from app import ...` and `from jwk import ...` are relative to these folders inside the containers.
+  "python.analysis.extraPaths": ["trusttrail", "services"]
+}

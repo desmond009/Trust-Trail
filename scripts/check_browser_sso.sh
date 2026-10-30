@@ -7,7 +7,7 @@
 set -euo pipefail
 USER_NAME=${1:-asha}; PASSWORD=${2:-student123}
 JAR=$(mktemp); OUT=$(mktemp -d); trap 'rm -rf "$JAR" "$OUT"' EXIT
-c() { curl -s -c "$JAR" -b "$JAR" "$@"; }
+c() { curl -s --max-time 20 -c "$JAR" -b "$JAR" "$@"; }
 
 login_at() {  # $1 = service URL, $2 = name for output files
   auth_url=$(c -o /dev/null -w '%{redirect_url}' "$1/login")

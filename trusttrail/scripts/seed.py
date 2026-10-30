@@ -147,6 +147,18 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
     print(f"client {sid:8} tier={svc['tier']:14} assignable profiles={allowed}")
 
 
+def create_dashboard_client():
+    # The students' own view. No pairwise mapper: TrustTrail needs the real user ID
+    # here to find the student's pseudonyms, and the dashboard is part of TrustTrail.
+    url = os.environ.get("TT_PUBLIC_URL", "http://localhost:8000")
+    created_id(f"/{REALM}/clients", {
+        "clientId": "dashboard", "name": "TrustTrail student dashboard",
+        "publicClient": False, "secret": os.environ["DASHBOARD_CLIENT_SECRET"],
+        "rootUrl": url, "redirectUris": [f"{url}/dashboard/callback"],
+        "standardFlowEnabled": True, "directAccessGrantsEnabled": False, "fullScopeAllowed": False,
+        "attributes": {"post.logout.redirect.uris": f"{url}/dashboard"}})
+
+
 def create_students():
     password = os.environ["STUDENT_DEMO_PASSWORD"]
     for s in settings.load("students")["students"]:
@@ -168,6 +180,7 @@ def main():
     create_trusttrail_client()
     for sid, svc in settings.services().items():
         create_service_client(sid, svc, profile_ids, basic_id)
+    create_dashboard_client()
     create_students()
     print("seed complete")
 

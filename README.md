@@ -18,6 +18,7 @@ docker compose run --rm trusttrail python -m scripts.seed    # creates/RESETS th
 |---|---|
 | Keycloak admin console | http://localhost:8080 (credentials in `.env`) |
 | TrustTrail API | http://localhost:8000/docs |
+| Student dashboard | http://localhost:8000/dashboard |
 | Digital Library | http://library.localhost:8001 |
 | Learning System | http://lms.localhost:8002 |
 | Examination Portal | http://exam.localhost:8003 |
@@ -204,6 +205,85 @@ unknown attribute, retention over, missing claim, wrong `typ`, another client's 
 releases refused for a missing, expired, foreign or too-narrow declaration, nonce replay, key
 registration with the wrong token, private key material, and receipt verification.
 
+## Phase 3: hash-chained ledger and student dashboard
+
+Every successful `/release` now writes one ledger entry and a TrustTrail-signed receipt, in
+the same transaction. Refused requests write nothing (Phase 4 records them as violations).
+
+**Entry format** (table `ledger` in `/data/trusttrail.db`):
+
+| Field | |
+|---|---|
+| `entry_id` | 1, 2, 3, ... assigned by TrustTrail, so gaps are visible |
+| `kind` | `release` (Phase 4 adds `violation`) |
+| `time` | ISO 8601 UTC, microseconds |
+| `service_id` | client ID of the service |
+| `student_pseudonym` | the per-service pairwise ID, **never** the Keycloak user ID |
+| `profile` | profile Keycloak granted |
+| `attributes_released` | sorted list of names, never values |
+| `purpose`, `retention_until`, `declaration_id` | copied from the signed declaration |
+| `service_signature` | signature part of the service's declaration JWS (full JWS kept in `declarations`) |
+| `prev_hash` | `entry_hash` of the previous entry; 64 zeros for entry 1 |
+| `entry_hash` | SHA-256 (hex) of the canonical JSON of all fields above |
+
+Canonical JSON = all fields except `entry_hash`, keys sorted, no whitespace, UTF-8
+(`app/ledger.py:canonical`). Verification (`ledger.verify`) recomputes the chain from the
+genesis hash and stops at the first entry whose number, `prev_hash` or content doesn't match.
+SQLite triggers reject `UPDATE` and `DELETE` on the ledger. That only stops edits through
+normal SQL use, so the hash chain is what makes tampering *evident*. The student ↔ pseudonym
+mapping stays in a separate file (`identity_map.db`), read only by the dashboard for the
+logged-in student.
+
+Receipts now also carry `entry_id` and `entry_hash`, so a receipt a student downloaded earlier
+can be checked against the ledger later.
+
+**Endpoints**
+- `GET /ledger/verify`: public; returns only `{ok, entries_checked, head_hash, first_bad_entry, reason}`.
+- `GET /dashboard`: student page (log in with Keycloak through the `dashboard` client).
+- `GET /dashboard/api/releases`: the logged-in student's releases, newest first.
+- `GET /dashboard/api/verify/{entry_id}`: four checks. The entry matches its hash; the chain is
+  intact up to it; the receipt is signed by TrustTrail; the receipt matches the entry.
+- `GET /dashboard/receipts/{entry_id}` and `GET /dashboard/receipts`: download a receipt bundle
+  (receipt JWS + decoded payload, TrustTrail's public key, the ledger entry, and the service's
+  signed declaration), so the student can check it without trusting TrustTrail's server.
+
+Students only see entries whose (service, pseudonym) pair is theirs; any other entry returns 404.
+
+### Demo
+
+```bash
+# Browser: log in to http://library.localhost:8001 and http://lms.localhost:8002, then open
+# http://localhost:8000/dashboard (same user). Each row has Receipt and Verify buttons.
+scripts/check_dashboard.sh                                      # same flow scripted, with PASS/FAIL checks
+
+docker compose exec trusttrail python -m scripts.demo_tamper    # 5 attacks on a COPY of the ledger, result table
+docker compose exec trusttrail python -m scripts.demo_tamper --live --entry 3   # break the real ledger...
+curl localhost:8000/ledger/verify                               # ...see it fail (or press Verify on the dashboard)
+docker compose exec trusttrail python -m scripts.demo_tamper --restore          # ...and put it back
+```
+
+Tamper demo output (attacking entry #11 of 22):
+
+| Attack | Chain check | Student receipts | Earlier head hash |
+|---|---|---|---|
+| A. change entry's attributes, leave its hash | detected at #11 | 1 fails | n/a (chain broken) |
+| B. change entry's purpose, recompute its hash | detected at #12 | 1 fails | n/a |
+| C. delete the entry | detected at #12 | 1 fails | n/a |
+| D. change entry, recompute every hash after it | **not detected** | 12 fail | detected |
+| E. delete the newest entry | **not detected** | 1 fails | detected |
+
+D and E are why Phase 5 anchors the head hash outside the database.
+
+### Tests
+
+`tests/test_ledger.py` (unit, in-memory database) covers linking, canonical hashing, the
+append-only triggers, and detection of an edited, edited-and-rehashed, deleted or renumbered
+entry. It also has two tests that *document the limits*: a full rewrite and a cut-off tail
+both pass the chain check. `tests/test_phase3_integration.py` checks that a release writes
+exactly one matching entry, the receipt points at it, a refusal writes nothing, the public
+check matches the ledger, 10 concurrent releases keep the chain intact, and the dashboard API
+needs login.
+
 ## Known limits (Phase 1)
 
 - **Why `sid` is stripped, and what that costs.** Keycloak 26 adds the SSO session ID (`sid`)
@@ -236,5 +316,18 @@ registration with the wrong token, private key material, and receipt verificatio
   Keycloak client secret, so the client secret is the root of trust for key registration.
 - **Purpose text is not checked for meaning.** TrustTrail checks attribute names against the
   declaration; it cannot judge whether the stated purpose is honest or proportionate.
-- **Releases are not recorded yet.** Receipts are returned to the service but not stored;
-  Phase 3 adds the ledger.
+
+## Known limits (Phase 3)
+
+- **We only see requests made to our system.** The ledger records every release TrustTrail
+  makes. It cannot record what a service does with the data afterwards.
+- **The chain alone can't catch a full rewrite or a cut-off tail.** Someone with write access
+  to the database file can drop the triggers, edit an entry and recompute every hash after it,
+  or delete the newest entries; the chain still verifies. Students' receipts catch this for
+  their own entries; Phase 5 anchoring catches it for everyone, but only from the moment of
+  each anchor.
+- **Tamper-evident, not tamper-proof.** The triggers only stop edits through normal SQL use.
+  Verification shows that something changed; it cannot restore what was there.
+- **The dashboard's Verify uses the receipt stored by TrustTrail.** An attacker who also
+  rewrote the receipts table would pass that check. Receipts the student downloaded earlier
+  are independent evidence (check them against the ledger entry, as the receipt file explains).

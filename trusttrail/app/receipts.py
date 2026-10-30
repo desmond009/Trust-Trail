@@ -44,3 +44,8 @@ def sign(claims: dict) -> str:
     payload = {"iss": "trusttrail", "iat": int(time.time()), "jti": str(uuid.uuid4()), **claims}
     return jwt.encode(payload, key, algorithm="ES256",
                       headers={"kid": public_ec_jwk(key)["kid"], "typ": TYP})
+
+
+def verify(jws: str) -> dict:
+    """Check a receipt against TrustTrail's own public key; raises jwt.PyJWTError if invalid."""
+    return jwt.decode(jws, _signing_key().public_key(), algorithms=["ES256"])

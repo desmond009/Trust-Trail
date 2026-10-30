@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrustTrail · My data releases</title>
+<style>
+  :root { --fg:#1d2433; --muted:#5d6678; --line:#dfe3ea; --bg:#f7f8fa; --ok:#1e7d4f; --bad:#b3261e; --accent:#2f5bd3; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--fg); background:var(--bg); }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:16px; }
+  header .wrap { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .wrap { max-width:1100px; margin:0 auto; }
+  main { padding:16px; }
+  h1 { font-size:20px; margin:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .tag { display:inline-block; background:#eef1f6; border-radius:4px; padding:1px 6px; margin:1px 2px 1px 0; font-size:13px; }
+  .overdue { color:var(--bad); font-weight:600; }
+  button, .btn { font:inherit; font-size:13px; border:1px solid var(--line); background:#fff; border-radius:6px;
+                 padding:4px 10px; cursor:pointer; color:var(--fg); text-decoration:none; display:inline-block; margin:2px 0; }
+  .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .result { font-size:13px; margin-top:6px; }
+  .result li { list-style:none; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); }
+  .status { font-weight:600; }
+  @media (max-width: 720px) {
+    thead { display:none; }
+    tr { display:block; border-bottom:1px solid var(--line); padding:8px 0; }
+    td { display:block; border:0; padding:4px 0; }
+    td::before { content: attr(data-label) ": "; color:var(--muted); font-size:12px; }
+  }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div><h1>My data releases</h1><div class="muted" id="who">TrustTrail student dashboard (demo, fake data)</div></div>
+  <div id="actions"></div>
+</div></header>
+<main><div class="wrap">
+  <div class="card" id="ledger-status"><span class="muted">Checking the ledger…</span></div>
+  <div class="card" id="content"><span class="muted">Loading…</span></div>
+  <p class="muted">Each row is one release recorded in TrustTrail's hash-chained ledger. Services receive a different
+  pseudonymous ID each; they see only the attributes listed. A receipt proves what was released and what the service
+  promised. It cannot prove the service deleted the data by the date shown.</p>
+</div></main>
+<script>
+const el = (tag, props = {}, ...kids) => {
+  const {dataset, ...rest} = props;
+  const n = Object.assign(document.createElement(tag), rest);
+  if (dataset) Object.assign(n.dataset, dataset);
+  kids.flat().forEach(k => n.append(k instanceof Node ? k : document.createTextNode(String(k))));
+  return n;
+};
+
+async function ledgerStatus() {
+  const box = document.getElementById("ledger-status");
+  const r = await fetch("/ledger/verify").then(r => r.json());
+  box.replaceChildren(r.ok
+    ? el("span", {className: "status pass"}, `✓ Ledger intact: ${r.entries_checked} entries recomputed from the first one.`)
+    : el("span", {className: "status fail"}, `✗ Ledger broken at entry ${r.first_bad_entry}: ${r.reason}`));
+}
+
+async function verify(id, out) {
+  out.replaceChildren(el("span", {className: "muted"}, "Verifying…"));
+  const r = await fetch(`/dashboard/api/verify/${id}`).then(r => r.json());
+  out.replaceChildren(el("ul", {className: "result"},
+    Object.entries(r.checks).map(([name, ok]) =>
+      el("li", {className: ok ? "pass" : "fail"}, `${ok ? "✓" : "✗"} ${name}`)),
+    el("li", {className: "muted"}, `Blockchain anchor: ${r.anchor}`)));
+}
+
+async function load() {
+  const res = await fetch("/dashboard/api/releases");
+  const content = document.getElementById("content");
+  const actions = document.getElementById("actions");
+  if (res.status === 401) {
+    content.replaceChildren(el("p", {}, "Log in to see which services received your data."));
+    actions.replaceChildren(el("a", {className: "btn primary", href: "/dashboard/login"}, "Log in with university SSO"));
+    return;
+  }
+  const data = await res.json();
+  document.getElementById("who").textContent = `Logged in as ${data.student}`;
+  actions.replaceChildren(
+    el("a", {className: "btn", href: "/dashboard/receipts"}, "Download all receipts"), " ",
+    el("a", {className: "btn", href: "/dashboard/logout"}, "Log out"));
+  if (!data.releases.length) {
+    content.replaceChildren(el("p", {}, "No service has received any of your data yet."));
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = data.releases.map(x => {
+    const out = el("div");
+    return el("tr", {},
+      el("td", {dataset: {label: "When"}}, new Date(x.time).toLocaleString()),
+      el("td", {dataset: {label: "Service"}}, x.service, el("div", {className: "muted"}, `profile: ${x.profile}`)),
+      el("td", {dataset: {label: "Attributes"}}, x.attributes.map(a => el("span", {className: "tag"}, a))),
+      el("td", {dataset: {label: "Purpose"}}, x.purpose),
+      el("td", {dataset: {label: "Delete by"}, className: x.delete_by < today ? "overdue" : ""},
+        x.delete_by, x.delete_by < today ? el("div", {}, "should be deleted") : ""),
+      el("td", {dataset: {label: "Evidence"}},
+        el("a", {className: "btn", href: `/dashboard/receipts/${x.entry_id}`}, "Receipt"), " ",
+        el("button", {onclick: () => verify(x.entry_id, out)}, "Verify"),
+        el("div", {className: "muted"}, `entry #${x.entry_id}`), out));
+  });
+  content.replaceChildren(el("table", {},
+    el("thead", {}, el("tr", {}, ["When", "Service", "Attributes", "Purpose", "Delete by", "Evidence"].map(h => el("th", {}, h)))),
+    el("tbody", {}, rows)));
+}
+
+ledgerStatus();
+load();
+</script>
+</body>
+</html>

@@ -10,6 +10,7 @@ ledger, so the ledger can be inspected without exposing who is who.
 """
 import hashlib
 import sqlite3
+import threading
 import uuid
 from urllib.parse import urlparse
 
@@ -37,6 +38,7 @@ def sector_identifier(client: dict) -> str:
 class PseudonymMap:
     def __init__(self, kc: KeycloakAdmin, path=None):
         self.kc = kc
+        self.lock = threading.RLock()   # one connection shared by FastAPI's worker threads
         self.db = sqlite3.connect(path or settings.DATA_DIR / "identity_map.db",
                                   check_same_thread=False)
         self.db.execute("""CREATE TABLE IF NOT EXISTS pseudonyms (
@@ -51,14 +53,15 @@ class PseudonymMap:
         sector = sector_identifier(client)
         salt = mapper["config"]["pairwiseSubAlgorithmSalt"]
         rows = [(client_id, pairwise_sub(sector, u["id"], salt), u["id"]) for u in self.kc.users()]
-        with self.db:
+        with self.lock, self.db:
             self.db.execute("DELETE FROM pseudonyms WHERE client_id = ?", (client_id,))
             self.db.executemany("INSERT INTO pseudonyms VALUES (?, ?, ?)", rows)
         return len(rows)
 
     def _lookup(self, client_id: str, pseudonym: str) -> str | None:
-        row = self.db.execute("SELECT user_id FROM pseudonyms WHERE client_id = ? AND pseudonym = ?",
-                              (client_id, pseudonym)).fetchone()
+        with self.lock:
+            row = self.db.execute("SELECT user_id FROM pseudonyms WHERE client_id = ? AND pseudonym = ?",
+                                  (client_id, pseudonym)).fetchone()
         return row[0] if row else None
 
     def resolve(self, client_id: str, pseudonym: str) -> str | None:
@@ -70,5 +73,6 @@ class PseudonymMap:
         return user_id
 
     def pseudonyms_for(self, user_id: str) -> dict[str, str]:
-        rows = self.db.execute("SELECT client_id, pseudonym FROM pseudonyms WHERE user_id = ?", (user_id,))
-        return dict(rows.fetchall())
+        with self.lock:
+            rows = self.db.execute("SELECT client_id, pseudonym FROM pseudonyms WHERE user_id = ?", (user_id,))
+            return dict(rows.fetchall())

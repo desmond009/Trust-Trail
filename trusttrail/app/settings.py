@@ -32,3 +32,15 @@ def services() -> dict:
 
 def tier_cap(tier: str) -> str:
     return load("trust")["tiers"][tier]
+
+
+def declaration_rules() -> dict:
+    return load("declarations")
+
+
+def attribute_vocabulary() -> set[str]:
+    """Every attribute name a declaration may mention: all profile attributes plus `sub`."""
+    names = {"sub"}
+    for spec in profiles()["profiles"].values():
+        names.update(spec["attributes"])
+    return names

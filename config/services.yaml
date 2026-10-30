@@ -1,19 +1,37 @@
 # Invented test services. Each gets its own *.localhost hostname because
 # Keycloak's pairwise mapper derives the "sector" from the redirect URI host:
 # three services all on plain "localhost" would form one sector.
+#
+# `declaration` is what each service signs and submits to TrustTrail before
+# asking for attributes. `sub` (the per-service pseudonym) counts as an attribute.
 services:
   library:
     name: Digital Library
     url: http://library.localhost:8001
     wants: pseudonym         # profile the app asks for at login
     tier: untrusted          # initial tier; caps what Keycloak will grant
+    declaration:
+      attributes: [sub, affiliation]
+      purpose: Confirm you are a current student before lending e-books, and keep your loan history.
+      retention_days: 30
+      valid_days: 30
   lms:
     name: Learning System
     url: http://lms.localhost:8002
     wants: partial
     tier: semi_trusted
+    declaration:
+      attributes: [sub, affiliation, department, program, year]
+      purpose: Enrol you in the courses of your department, program and year.
+      retention_days: 180
+      valid_days: 30
   exam:
     name: Examination Portal
     url: http://exam.localhost:8003
     wants: total
     tier: fully_trusted
+    declaration:
+      attributes: [sub, affiliation, department, program, year, name, email, roll_no]
+      purpose: Print your name and roll number on hall tickets, and email you your results.
+      retention_days: 365
+      valid_days: 30

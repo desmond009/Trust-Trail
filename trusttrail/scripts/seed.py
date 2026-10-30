@@ -107,6 +107,9 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
         "secret": os.environ[f"{sid.upper()}_CLIENT_SECRET"],
         "rootUrl": svc["url"], "redirectUris": [f"{svc['url']}/callback"],
         "standardFlowEnabled": True, "fullScopeAllowed": False,
+        # Service account (no roles): lets the service authenticate as itself
+        # to TrustTrail when it registers its declaration-signing key.
+        "serviceAccountsEnabled": True,
         # TEST ONLY: lets scripts log students in without a browser.
         "directAccessGrantsEnabled": True,
         "attributes": {"post.logout.redirect.uris": svc["url"],
@@ -118,9 +121,10 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
 
     # Strip the realm's default scopes (profile, email, roles, ...): a service
     # must get nothing from Keycloak except the pairwise sub ("basic").
+    # "service_account" stays: it only adds client_id to client-credentials tokens.
     for kind in ("default-client-scopes", "optional-client-scopes"):
         for s in call("GET", f"/{REALM}/clients/{cid}/{kind}"):
-            if s["id"] != basic_id:
+            if s["id"] != basic_id and s["name"] != "service_account":
                 call("DELETE", f"/{REALM}/clients/{cid}/{kind}/{s['id']}")
     if basic_id not in {s["id"] for s in call("GET", f"/{REALM}/clients/{cid}/default-client-scopes")}:
         call("PUT", f"/{REALM}/clients/{cid}/default-client-scopes/{basic_id}")

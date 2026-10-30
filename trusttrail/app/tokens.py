@@ -37,3 +37,15 @@ def verify_access_token(token: str) -> dict:
     if claims.get("typ") != "Bearer" or not claims.get("azp") or not claims.get("sub"):
         raise TokenError("not a Keycloak access token for a client")
     return claims
+
+
+def verify_service_token(token: str) -> dict:
+    """A service acting as itself (client-credentials grant), not on behalf of a student.
+
+    Keycloak puts `client_id` only in service-account tokens, so a student's
+    login token for the same service is rejected here.
+    """
+    claims = verify_access_token(token)
+    if claims.get("client_id") != claims["azp"]:
+        raise TokenError("expected a client-credentials token for the service itself")
+    return claims

@@ -94,9 +94,115 @@ Single sign-on logs you straight in, and each page shows a different `sub`.
 ### Tests
 
 ```bash
-docker compose exec trusttrail pytest -m "not integration"   # unit: pairwise algorithm, profile filtering
+docker compose exec trusttrail pytest -m "not integration"   # unit: pairwise algorithm, profile filtering, declarations
 docker compose exec trusttrail pytest                        # + integration against the seeded stack
 ```
+
+## Phase 2: signed purpose declarations and receipts
+
+Before a service gets any attribute, it signs a **purpose declaration** (which attributes, why,
+and when it will delete them) with its own key. TrustTrail checks the signature, stores the
+declaration verbatim, and refuses any release the declaration does not cover. Each release
+returns a **receipt** signed by TrustTrail that links what was released to what was promised.
+This gives non-repudiable evidence of what a service promised. It does not guarantee the
+service keeps the promise.
+
+**Flow**
+1. The service registers its public key: `POST /services/keys` (authenticated as the service).
+2. The service signs a declaration and submits it: `POST /declarations`.
+3. A student logs in through Keycloak (Phase 1).
+4. The service calls `POST /release` with the student's token and the `declaration_id`.
+
+Test services generate their key on first use into the `svc-keys` Docker volume, and their
+declarations come from `config/services.yaml`. Declaration rules (accepted algorithms, maximum
+lifetime, clock skew) are in `config/declarations.yaml`. TrustTrail's receipt key is generated
+into the `tt-data` volume. No private key is ever in the repo.
+
+### API
+
+**`POST /services/keys`**: header `Authorization: Bearer <client-credentials token of the service>`.
+A student's login token for the same service is rejected, because only client-credentials tokens
+carry `client_id`.
+```json
+{"keys": [{"kty": "EC", "crv": "P-256", "x": "...", "y": "...", "kid": "<RFC 7638 thumbprint>", "alg": "ES256", "use": "sig"}]}
+```
+→ `200 {"client_id": "lms", "kids": ["..."]}`. Keys are append-only: re-registering the same key
+is fine, but reusing a `kid` for a different key returns `409 kid_conflict`, so old declarations
+stay verifiable.
+
+**`POST /declarations`**: body `{"declaration": "<compact JWS>"}`. No bearer token; the
+signature is the authentication.
+
+| JWS header | |
+|---|---|
+| `alg` | `ES256` or `RS256` |
+| `kid` | a key registered by this service |
+| `typ` | `purpose-declaration+jwt` |
+
+| JWS payload | |
+|---|---|
+| `client_id` | the service, e.g. `"lms"` |
+| `aud` | `"trusttrail"` |
+| `attributes` | names from the profile vocabulary; `sub` = the per-service pseudonym |
+| `purpose` | free text, 1–500 characters |
+| `retention_until` | ISO date by which the service promises to delete the data |
+| `nonce` | unique per service (replay protection) |
+| `iat`, `exp` | when the declaration was issued and until when it may back releases (max 90 days) |
+
+→ `201` with the stored declaration: `declaration_id` (first 16 hex digits of `jws_sha256`),
+`client_id`, `nonce`, `attributes`, `purpose`, `retention_until`, `issued_at`, `expires_at`,
+`kid`, `jws`, `jws_sha256`. `GET /declarations/{id}` returns the same object.
+
+**`POST /release`**: header `Authorization: Bearer <student's access token for this service>`.
+```json
+{"declaration_id": "226617abd0d39a21", "attributes": ["sub", "department"]}
+```
+`attributes` is optional; leaving it out means "everything my declaration covers that my
+profile allows". → `200`:
+```json
+{"service": "lms", "profile": "partial", "declaration_id": "226617abd0d39a21",
+ "released": {"sub": "97d4…", "department": "Computer Science"},
+ "receipt": "<JWS signed by TrustTrail, typ release-receipt+jwt>"}
+```
+The receipt payload contains `iss`, `iat`, `jti`, `service`, `profile`, `attributes` (names only,
+never values), `subject` (only if the pseudonym was released), `purpose`, `retention_until`,
+`declaration_id`, `declaration_sha256` and `released_at`. Verify it with
+**`GET /.well-known/jwks.json`**.
+
+**Refusals** are always `{"error": "<code>", "detail": "..."}`:
+
+| Code | Status | When |
+|---|---|---|
+| `invalid_token` / `missing_token` | 401 | bad or missing bearer token |
+| `invalid_jwks`, `kid_conflict` | 400, 409 | key registration problems |
+| `malformed`, `unsupported_alg` | 400 | not a valid declaration JWS |
+| `unknown_key` | 400 | `kid` not registered for that `client_id` |
+| `bad_signature` | 400 | signature doesn't match the registered key |
+| `expired`, `not_yet_valid`, `lifetime_too_long` | 400 | `exp`/`iat` out of bounds at submission |
+| `wrong_audience` | 400 | `aud` isn't `trusttrail` |
+| `unknown_attribute` | 400 | attribute not in the vocabulary |
+| `retention_in_past` | 400 | `retention_until` already over |
+| `replayed_nonce` | 409 | nonce reused by the same service |
+| `no_declaration` | 403 | release without a declaration, or with another service's |
+| `declaration_expired` | 403 | the declaration's `exp` has passed |
+| `retention_passed` | 403 | release after the promised deletion date *(becomes violation rule 2 in Phase 4)* |
+| `attribute_not_declared` | 403 | asks for an attribute the purpose doesn't cover *(rule 1)* |
+| `attribute_above_profile` | 403 | asks for more than the Keycloak-granted profile allows *(rule 3)* |
+
+### Demo and tests
+
+```bash
+docker compose exec trusttrail python -m scripts.demo_phase2   # full request/response formats + refusal table
+```
+In the browser, each test service's front page shows its declared purpose; after login it
+shows the release and the receipt payload.
+
+Tests: `tests/test_declarations.py` (unit, fixed clock) covers a valid signature, a bad
+signature (wrong key and tampered payload), expired, not yet valid, too long, wrong audience,
+unknown attribute, retention over, missing claim, wrong `typ`, another client's key, and
+`alg: none`. `tests/test_phase2_integration.py` covers the same cases end to end, plus
+releases refused for a missing, expired, foreign or too-narrow declaration, nonce replay, key
+registration with the wrong token, private key material, and receipt verification.
 
 ## Known limits (Phase 1)
 
@@ -119,3 +225,16 @@ docker compose exec trusttrail pytest                        # + integration aga
 - **We only see requests made to our system.** TrustTrail controls attribute values because
   Keycloak tokens contain none. It cannot control what a service does with data afterwards.
 - Access tokens are checked locally (signature, issuer, expiry). Revocation before expiry is not checked.
+
+## Known limits (Phase 2)
+
+- **A declaration is a promise, not a guarantee.** TrustTrail can prove what a service
+  promised and what it was given. It cannot see what the service does with the data
+  afterwards, and it cannot prove deletion by `retention_until`.
+- **Non-repudiation rests on key custody.** A signed declaration binds the service only as
+  long as its private key is not shared or stolen. Registering a key requires the service's
+  Keycloak client secret, so the client secret is the root of trust for key registration.
+- **Purpose text is not checked for meaning.** TrustTrail checks attribute names against the
+  declaration; it cannot judge whether the stated purpose is honest or proportionate.
+- **Releases are not recorded yet.** Receipts are returned to the service but not stored;
+  Phase 3 adds the ledger.

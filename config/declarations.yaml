@@ -1,0 +1,6 @@
+# Rules for signed purpose declarations. Starting values; tune as needed.
+audience: trusttrail             # `aud` every declaration must carry
+algorithms: [ES256, RS256]       # accepted JWS algorithms (never "none" or HMAC)
+max_lifetime_days: 90            # exp - iat may not exceed this
+clock_skew_seconds: 30           # tolerance when checking iat/exp at submission
+max_purpose_length: 500

@@ -6,6 +6,7 @@ import pytest
 
 from app import settings
 from app.demo_login import PERSONAL_CLAIMS, claims, login, release
+from app.demo_service import DemoService
 from app.keycloak import KeycloakAdmin
 from app.pseudonyms import pairwise_sub, sector_identifier
 
@@ -66,8 +67,9 @@ def test_nothing_links_sessions_across_services(service):
 @pytest.mark.parametrize("service", list(SERVICES))
 def test_release_matches_profile(service):
     wants = SERVICES[service]["wants"]
+    decl = DemoService(service).declare()   # each test service declares exactly its profile
     tok = login(service, "asha", wants).json()
-    body = release(tok["access_token"]).json()
+    body = release(tok["access_token"], decl["declaration_id"]).json()
     spec = settings.profiles()["profiles"][wants]
     assert body["profile"] == wants
     assert set(body["released"]) == set(spec["attributes"]) | ({"sub"} if spec["sub"] else set())

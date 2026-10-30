@@ -2,7 +2,8 @@ name: trusttrail
 
 x-service-app: &service-app
   build: ./services
-  volumes: ["./services:/app", "./config:/config:ro"]
+  # svc-keys holds each service's declaration-signing key (generated on first use).
+  volumes: ["./services:/app", "./config:/config:ro", "svc-keys:/keys"]
   depends_on:
     keycloak: {condition: service_healthy}
     trusttrail: {condition: service_started}
@@ -59,3 +60,4 @@ services:
 volumes:
   kc-data:
   tt-data:
+  svc-keys:

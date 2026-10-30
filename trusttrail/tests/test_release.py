@@ -1,7 +1,9 @@
 import pytest
 
 from app import settings
-from app.release import build_release, granted_profile, student_attributes
+from app.errors import Refusal
+from app.release import (build_release, choose_attributes, granted_profile,
+                         profile_attributes, student_attributes)
 
 ORDER = settings.profiles()["order"]
 USER = {"firstName": "Asha", "lastName": "Kulkarni", "email": "asha@students.example.edu",
@@ -20,21 +22,40 @@ def test_granted_profile(scope, expected):
     assert granted_profile(scope) == expected
 
 
-def test_release_contains_exactly_the_profile_attributes():
-    attrs = student_attributes(USER)
-    for profile in ORDER:
-        spec = settings.profiles()["profiles"][profile]
-        released = build_release(profile, attrs, "pseudo-123")
-        expected = set(spec["attributes"]) | ({"sub"} if spec["sub"] else set())
-        assert set(released) == expected, profile
-
-
-def test_anonymous_release_has_no_identifier():
-    released = build_release("anonymous", student_attributes(USER), "pseudo-123")
-    assert "sub" not in released and released == {"affiliation": "student"}
+def test_profile_attributes_match_config():
+    assert profile_attributes("anonymous") == {"affiliation"}
+    assert profile_attributes("pseudonym") == {"sub", "affiliation"}
+    assert "roll_no" in profile_attributes("total") and "roll_no" not in profile_attributes("partial")
 
 
 def test_profiles_are_nested():
     # Each profile must reveal at least what the one below it does; tier caps rely on this.
-    sets = [set(settings.profiles()["profiles"][p]["attributes"]) for p in ORDER]
+    sets = [profile_attributes(p) for p in ORDER]
     assert all(lower <= upper for lower, upper in zip(sets, sets[1:]))
+
+
+def test_default_request_is_declared_and_allowed():
+    declared = ["sub", "affiliation", "department", "roll_no"]
+    assert choose_attributes(None, declared, profile_attributes("partial")) == ["affiliation", "department", "sub"]
+
+
+def test_request_beyond_declaration_is_refused():
+    with pytest.raises(Refusal) as e:
+        choose_attributes(["email"], ["sub", "affiliation"], profile_attributes("total"))
+    assert e.value.code == "attribute_not_declared"
+
+
+def test_request_beyond_profile_is_refused():
+    with pytest.raises(Refusal) as e:
+        choose_attributes(["roll_no"], ["sub", "roll_no"], profile_attributes("pseudonym"))
+    assert e.value.code == "attribute_above_profile"
+
+
+def test_build_release_fills_values_and_pseudonym():
+    released = build_release(["sub", "name", "year"], student_attributes(USER), "pseudo-123")
+    assert released == {"sub": "pseudo-123", "name": "Asha Kulkarni", "year": "2"}
+
+
+def test_anonymous_release_has_no_identifier():
+    names = choose_attributes(None, ["sub", "affiliation"], profile_attributes("anonymous"))
+    assert build_release(names, student_attributes(USER), "pseudo-123") == {"affiliation": "student"}

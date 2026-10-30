@@ -4,6 +4,7 @@
 """
 from app import settings
 from app.demo_login import PERSONAL_CLAIMS, claims, login, release
+from app.demo_service import DemoService
 
 SERVICES = settings.services()
 STUDENTS = [s["username"] for s in settings.load("students")["students"]]
@@ -26,7 +27,8 @@ def main():
     for sid, svc in SERVICES.items():
         tok = login(sid, "asha", svc["wants"]).json()
         leaked = PERSONAL_CLAIMS & (claims(tok["id_token"]).keys() | claims(tok["access_token"]).keys())
-        body = release(tok["access_token"]).json()
+        decl = DemoService(sid).declare()   # Phase 2: releases need a signed declaration
+        body = release(tok["access_token"], decl["declaration_id"]).json()
         print(f"{sid:8} profile={body['profile']:9} personal claims in Keycloak tokens: {sorted(leaked) or 'none'}")
         print(f"{'':8} released by TrustTrail: {body['released']}")
 

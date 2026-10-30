@@ -24,5 +24,7 @@ def claims(token: str) -> dict:
     return jwt.decode(token, options={"verify_signature": False})
 
 
-def release(access_token: str, base: str = "http://localhost:8000") -> httpx.Response:
-    return httpx.post(f"{base}/release", headers={"Authorization": f"Bearer {access_token}"})
+def release(access_token: str, declaration_id: str | None = None,
+            attributes: list[str] | None = None, base: str = "http://localhost:8000") -> httpx.Response:
+    body = {k: v for k, v in {"declaration_id": declaration_id, "attributes": attributes}.items() if v is not None}
+    return httpx.post(f"{base}/release", json=body, headers={"Authorization": f"Bearer {access_token}"})

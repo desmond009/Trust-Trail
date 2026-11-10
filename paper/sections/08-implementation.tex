@@ -1,0 +1,107 @@
+\section{Implementation}
+\label{sec:implementation}
+
+We implemented TrustTrail in six phases. Each phase added one mechanism with its own tests and demonstration script: profiles and pseudonyms; declarations and receipts; the ledger and dashboard; violations and trust; anchoring; and the evaluation harness. This section describes the result. All students, services and secrets in the implementation are invented demo data.
+
+\subsection{Technology stack}
+Table~\ref{tab:stack} lists the main technologies. Keycloak suits the design because it is a widely used open-source IdP that supports pairwise identifiers, per-client scope assignment, an Admin REST API and plug-in protocol mappers. Python and FastAPI kept the TrustTrail service small. SQLite is enough for one release service at campus scale and keeps the ledger in a single file, which also made the tamper experiments easy to run on a copy. Hardhat provides a local Ethereum chain that starts in seconds, so the full system, including anchoring, runs on one laptop.
+
+\begin{table}[t]
+\centering
+\caption{Technology stack}
+\label{tab:stack}
+\small
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+Layer & Technology & Use \\
+\midrule
+Identity provider & Keycloak 26.8.1 & OIDC, pairwise mapper, client scopes, Admin API, events \\
+Keycloak extension & Java 21, Maven & \code{trusttrail-strip-sid-mapper} (protocol mapper SPI) \\
+Release service & Python 3.12, FastAPI 0.162, Uvicorn & TrustTrail API, dashboard, background threads \\
+JOSE & PyJWT 2.15 (with \code{cryptography}) & token verification, declarations, receipts \\
+OIDC client & Authlib 1.9 & dashboard login, demo services \\
+Storage & SQLite (Python standard library) & ledger, declarations, trust state, identity map \\
+Blockchain client & web3.py 7.16 & anchoring, batch reads \\
+Smart contract & Solidity 0.8.28 (optimiser, 200 runs) & \code{TrustTrailAnchor} \\
+Chain and tests & Hardhat 3.20, ethers 6, Mocha, Node 22 & local chain, deployment, contract tests \\
+Deployment & Docker Compose & seven containers (Table~\ref{tab:containers}) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Code organisation and size}
+TrustTrail consists of 20 Python modules. The largest are the usability-study prototype (375 lines), the anchorer (179), the declaration verifier (170), the trust engine (168) and the dashboard (152). Table~\ref{tab:loc} gives the size of each part of the code base, counted with \code{wc -l} including comments and blank lines and excluding third-party code. In total the system is about 5{,}800 lines of code, of which about 1{,}200 are tests.
+
+\begin{table}[t]
+\centering
+\caption{Size of the implementation}
+\label{tab:loc}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Component & Files & Lines \\
+\midrule
+TrustTrail application (Python) & 20 & 2{,}159 \\
+Dashboard page (HTML, JavaScript) & 1 & 139 \\
+Scripts: seeding, demonstrations, verifiers, bad services (Python) & 9 & 1{,}025 \\
+Tests (Python) & 14 & 1{,}198 \\
+Evaluation harness (Python, shell) & 7 & 610 \\
+Demo service application (Python) & 2 & 150 \\
+Anchor contract (Solidity) & 1 & 56 \\
+Deployment script, contract tests, Hardhat configuration (TypeScript) & 3 & 135 \\
+Keycloak protocol mapper (Java) & 1 & 72 \\
+Browser-level check scripts (shell, Python) & 3 & 224 \\
+Configuration (YAML) & 7 & 255 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Configuration}
+Behaviour that an institute may want to change lives in seven YAML files rather than in code: the profiles and their attributes; the services with their URLs, base tiers and declarations; the invented students; the trust tiers, score weights and synchronisation interval; the anchoring interval, maximum batch size and transaction timeout; the declaration rules (accepted algorithms, maximum lifetime of 90 days, 30\,s clock skew, 500-character purpose limit); and the usability-study scenarios. Secrets, such as client secrets, the administrator token and the anchoring key, are read from an environment file that is excluded from version control.
+
+A seed script builds the Keycloak realm from these files through the Admin API: the four profile scopes, the service clients with their mappers and capped optional scopes, the dashboard client, the evaluation clients and the five students. The seed script deletes and recreates the realm, which makes demonstrations and tests repeatable.
+
+\subsection{API}
+Table~\ref{tab:api} summarises TrustTrail's HTTP API; Appendix~\ref{app:api} gives the full request and response formats. Endpoints that expose only hashes, scores and counts are public, so that anyone can check the ledger against the chain. Administrative endpoints require a bearer token compared in constant time.
+
+\begin{table}[t]
+\centering
+\caption{TrustTrail HTTP API (summary)}
+\label{tab:api}
+\small
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+Endpoint & Caller & Purpose \\
+\midrule
+\code{POST /services/keys} & service (client-credentials token) & register public signing keys \\
+\code{POST /declarations} & service (signed JWS) & submit a purpose declaration \\
+\code{GET /declarations/\{id\}} & public & read a stored declaration \\
+\code{POST /release} & service (student's access token) & obtain attribute values and a receipt \\
+\code{GET /.well-known/jwks.json} & public & TrustTrail's receipt-signing key \\
+\code{GET /ledger/verify} & public & check the hash chain (no entry contents) \\
+\code{GET /ledger/proof/\{id\}} & public & Merkle proof of one entry \\
+\code{GET /anchors}, \code{GET /anchors/verify} & public & list batches; compare ledger with chain \\
+\code{POST /anchors/run} & administrator & anchor now \\
+\code{GET /trust} & public & score, tier and cap of every service \\
+\code{POST /trust/sync}, \code{POST /trust/\{s\}/reset} & administrator & re-apply caps; forgive a service (recorded) \\
+\code{/dashboard/...} & student (Keycloak login) & list, verify and download own entries \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Demonstration services}
+The three honest services share one FastAPI application. On first use, a service generates its EC P-256 signing key into a Docker volume, registers the public key, and signs a declaration built from the configuration; it signs a fresh declaration when the current one is missing or expires within an hour. Its home page shows the declared purpose and, after login, the claims in its Keycloak ID token, the result of \code{/release} and the decoded receipt, which makes the separation between the two visible in a demonstration.
+
+For the violation experiments, three scripted services each break exactly one rule. \emph{Campus Deals} (semi-trusted) declares only \code{sub} and \code{affiliation} but asks for department and e-mail address as well (rule~1). \emph{Alumni Tracker} (semi-trusted, and registered without a privacy policy, so its score starts at 85) declares a deletion time two seconds in the future, receives data once, waits three seconds and asks again (rule~2). \emph{Career Portal} (untrusted) asks Keycloak for the \code{profile-total} scope (rule~3). Apart from their one misbehaviour they act normally: each asks for the lower of the profile it wants and its current public cap, so a demoted service adapts to its new tier.
+
+\subsection{Testing}
+The test suite has three layers.
+\begin{itemize}
+\item \emph{94 unit tests} (70 test functions) run without the rest of the system: the pairwise algorithm, profile selection and the three rules, 16 cases of declaration verification (including \code{alg: none}, tampered payloads, another service's key and timestamps without a time zone), the ledger and its attacks, the trust formula, the Merkle tree with proofs for 1 to 33 leaves, ledger-against-chain verification, and the evaluation helpers.
+\item \emph{55 integration tests} (41 functions) run against the seeded Docker stack, one file per phase. Among other things they check that every student has a different identifier at every service, that TrustTrail's recomputed pseudonyms match Keycloak's, that tokens carry no personal claims, that Keycloak enforces the tier cap, that a forged token is rejected, that 10 concurrent releases keep the chain intact, that each bad service is caught with the right rule and loses one tier per violation, that honest services get no violations, and that a downloaded receipt verifies against the chain and fails after its entry is edited.
+\item \emph{6 contract tests} in Hardhat check that a batch is stored and the event emitted, that batches must be contiguous from entry~1, that empty ranges and non-owners are rejected, that \code{anchor} is the only state-changing function, and that anchoring a range of 100{,}000 entries does not cost more gas than the first anchor.
+\end{itemize}
+Three end-to-end scripts drive the real system as a user would: a browser-level SSO check (different \code{sub}, no \code{sid}, \code{session\_state} or \code{auth\_time}), a dashboard check (list, verify, download and independently verify a receipt; another student's entry returns 404), and a scripted run of the usability-study screens. All 149 Python tests and the 6 contract tests passed on 10 November 2026.
+
+\subsection{Reproducibility}
+The whole system starts with two commands, \code{docker compose up -d --build} followed by the seed script, and the evaluation in Section~\ref{sec:evaluation} runs with one more (\code{sh eval/run\_all.sh}, about three minutes). Appendix~\ref{app:repro} lists the commands. The first build compiles the Keycloak mapper with Maven inside Docker and needs network access; later builds are cached.

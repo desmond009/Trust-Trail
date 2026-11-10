@@ -1,0 +1,275 @@
+\section{Detailed Design}
+\label{sec:design}
+
+This section describes TrustTrail's five mechanisms in the order in which they were built: disclosure profiles and pseudonyms (\ref{sec:design-profiles}), purpose declarations and receipts (\ref{sec:design-declarations}), the ledger and dashboard (\ref{sec:design-ledger}), violations and trust (\ref{sec:design-trust}), and anchoring (\ref{sec:design-anchoring}). Section~\ref{sec:design-release} then brings them together in the release algorithm.
+
+\subsection{Disclosure profiles, tier caps and pseudonyms}
+\label{sec:design-profiles}
+
+\subsubsection{Profiles}
+TrustTrail adopts the four interaction profiles of Werner et al.~\cite{werner2015approach,werner2017survey}. Table~\ref{tab:profiles} gives the attributes that each profile releases in our deployment. The profiles are nested: each one releases everything the previous one does, plus more. The attribute vocabulary has eight names. The name \code{sub} stands for the service's pairwise pseudonym; the other seven are values from the student's Keycloak record. Profiles are defined in a configuration file, so an institute can change their contents without changing code.
+
+\begin{table}[t]
+\centering
+\caption{Disclosure profiles and tier caps}
+\label{tab:profiles}
+\small
+\begin{tabularx}{\linewidth}{@{}l X l l@{}}
+\toprule
+Profile & Released attributes & Cap of tier & Example service (base tier) \\
+\midrule
+anonymous & affiliation & blocked & -- \\
+pseudonym & \code{sub}, affiliation & untrusted & Digital Library \\
+partial & \code{sub}, affiliation, department, program, year & semi\_trusted & Learning System \\
+total & \code{sub}, affiliation, department, program, year, name, email, roll\_no & fully\_trusted & Examination Portal \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{Tier caps at the IdP}
+Each service has a \emph{base tier}, which is part of its agreement with the institute, and a \emph{current tier}, which can only be equal to or lower than the base tier (Section~\ref{sec:design-trust}). Each tier has a cap, the most revealing profile a service in that tier can obtain. TrustTrail enforces the current cap at Keycloak by assigning to the service's client exactly the optional scopes \code{profile-anonymous} up to \code{profile-}\emph{cap}. A service that asks for a profile scope that is not assigned gets an \code{invalid\_scope} error from Keycloak, and the student cannot log in to it with that request. The scopes have no claim mappers, so a granted profile only appears in the token's \code{scope} claim; it does not add any personal data to the token. To keep Keycloak from releasing personal data through its built-in scopes, the seed script removes every default scope from service clients except \code{basic}, and removes the \code{auth\_time} mapper from \code{basic}.
+
+\subsubsection{Pairwise pseudonyms}
+Every service client has Keycloak's SHA-256 pairwise subject mapper with an empty configured salt, which makes Keycloak generate a random salt per client. For a student with Keycloak user ID $u$, service sector $s$ (the host name of the service's redirect URIs) and client salt $k$, the pseudonym is
+\begin{equation}
+\mathit{sub}(u, s, k) = \mathrm{UUIDv3}\bigl(\mathrm{SHA\mbox{-}256}(s \,\|\, u \,\|\, k)\bigr),
+\end{equation}
+where $\mathrm{UUIDv3}(x)$ is Java's \code{UUID.nameUUIDFromBytes}, an MD5-based version-3 UUID of $x$. Each demo service runs under its own host name (\code{library.localhost}, \code{lms.localhost}, \code{exam.localhost}), so each is its own sector.
+
+TrustTrail needs to map a pseudonym back to the student in order to fetch attribute values. It recomputes every student's pseudonym for a service with a port of Keycloak's algorithm, using the salt read through the Admin API, and stores the pairs in \code{identity\_map.db}. On an unknown pseudonym it rebuilds the table once. An integration test checks that the recomputed value equals the \code{sub} that Keycloak actually issues, for every student and every service.
+
+\subsubsection{Removing the shared session identifier}
+Pairwise identifiers alone did not give unlinkability in Keycloak~26. Keycloak adds the SSO session identifier \code{sid} to every token, and it has no built-in setting to turn this off. Every client that a student reaches within one SSO session receives the same \code{sid}. Two colluding services could therefore compare \code{sid} values and learn that pseudonym \code{f266e8cf\ldots} at the library and pseudonym \code{4336de76\ldots} at the LMS belong to the same student, which defeats the pairwise mapper.
+
+We wrote a Keycloak protocol mapper, \code{trusttrail-strip-sid-mapper}, to remove it. It is a 72-line Java class that extends Keycloak's \code{AbstractOIDCProtocolMapper}, implements the access-token and ID-token mapper interfaces, and sets the token's session identifier to null in both. It is packaged as a JAR, built with Maven inside the Keycloak image's Docker build, and registered through Java's service loader. Two client settings remove the remaining linkable values: \code{exclude.session.state.from.auth.response=true} drops \code{session\_state} from the authorisation response, and removing the \code{auth\_time} mapper drops the exact authentication time.
+
+Removing \code{sid} has a cost. Service tokens no longer point to a Keycloak session, so refresh tokens (which we switched off), the userinfo endpoint and logout with \code{id\_token\_hint} do not work for the service clients. TrustTrail verifies access tokens locally and is not affected. Keycloak logs a warning at start-up that the protocol mapper interface is internal and may change between versions. A browser-level check script logs in to the library and then the LMS in one SSO session, using curl as the browser, and passes only if the two \code{sub} values differ and no \code{sid}, \code{session\_state} or \code{auth\_time} reaches either service. Deleting the mapper from the two clients makes the \code{sid} check fail, which shows that the mapper is what provides this property.
+
+\subsection{Purpose declarations and receipts}
+\label{sec:design-declarations}
+
+\subsubsection{Service keys}
+Before declaring anything, a service registers its public key. It obtains a token with the OAuth client credentials grant, using its Keycloak client secret, and calls \code{POST /services/keys} with one or more public JWKs. TrustTrail accepts only tokens that carry a \code{client\_id} claim equal to \code{azp}; Keycloak adds this claim only to client-credentials tokens, so a student's login token for the same service is rejected. Keys must be EC or RSA, must have a \code{kid}, and must not contain private members. Our services use EC P-256 keys whose \code{kid} is the RFC~7638 thumbprint. The key registry is append-only: re-registering the same key is accepted, but reusing a \code{kid} for a different key returns \code{409 kid\_conflict}. Old declarations therefore stay verifiable forever.
+
+\subsubsection{Declaration format and checks}
+A purpose declaration is a compact JWS. Listing~\ref{lst:declaration} shows the header and payload of the LMS's declaration. The header must have \code{typ} equal to \code{purpose-declaration+jwt}, so that no other kind of JWT signed with the same key can be submitted as a declaration. The payload names the service, the audience \code{trusttrail}, the attributes, a free-text purpose of at most 500 characters, the deletion date \code{retention\_until}, a fresh nonce and the validity period. A deletion date given as a calendar date means the end of that day in UTC; a timestamp with a time zone is taken exactly.
+
+\begin{lstlisting}[caption={Header and payload of a purpose declaration (LMS)}, label={lst:declaration}]
+{ "alg": "ES256", "kid": "<RFC 7638 thumbprint of the LMS key>",
+  "typ": "purpose-declaration+jwt" }
+{ "client_id": "lms", "aud": "trusttrail",
+  "attributes": ["sub", "affiliation", "department", "program", "year"],
+  "purpose": "Enrol you in the courses of your department, program and year.",
+  "retention_until": "2027-05-09",
+  "nonce": "<uuid4>", "iat": 1794297600, "exp": 1796889600 }
+\end{lstlisting}
+
+A service submits the JWS to \code{POST /declarations}. No bearer token is needed, because the signature authenticates the service. TrustTrail checks, in order: that the JWS parses and has the right \code{typ}; that \code{alg} is ES256 or RS256 (never \code{none} or an HMAC algorithm); that a registered key exists for the payload's \code{client\_id} and the header's \code{kid}; the signature; the audience; that the declaration is not expired and not issued in the future (with 30\,s of allowed clock skew) and is valid for at most 90 days; that the attributes are a non-empty list of known names; that the purpose is a non-empty string; and that the deletion date parses and is not already past. A nonce may be used only once per service, which stops an old declaration from being replayed as new. TrustTrail stores the declaration together with the original JWS and its SHA-256 hash, and identifies it by the first 16 hex digits of that hash. Table~\ref{tab:refusals} lists the error codes.
+
+The key is looked up by the \code{client\_id} in the unverified payload, and the signature check then proves that the holder of that service's key signed it. A service cannot submit a declaration in another service's name without the other service's private key.
+
+\subsubsection{Receipts}
+Every successful release produces a receipt: a JWS with \code{typ} \code{release-receipt+jwt}, signed with TrustTrail's own EC P-256 key. Its payload contains the issuer, a unique identifier, the service, the profile, the names (never the values) of the released attributes, the pseudonym (only if \code{sub} was released), the purpose, the deletion date, the declaration identifier and the SHA-256 hash of the declaration's JWS, the time of release, and the number and hash of the ledger entry. TrustTrail publishes its public key at \code{/.well-known/jwks.json}.
+
+The two signatures give two kinds of evidence. The declaration, signed by the service, shows what the service promised, and the service cannot later deny it as long as its key was not stolen. The receipt, signed by TrustTrail, shows what TrustTrail released under that promise; its \code{declaration\_sha256} binds the release to the exact declaration. A student who downloads a receipt holds evidence that does not depend on TrustTrail's database staying unchanged.
+
+\begin{table}[t]
+\centering
+\caption{Refusals returned by TrustTrail}
+\label{tab:refusals}
+\small
+\begin{tabularx}{\linewidth}{@{}l l X l@{}}
+\toprule
+Code & HTTP & Meaning & Violation \\
+\midrule
+\code{malformed}, \code{unsupported\_alg}, \code{unknown\_key} & 400 & declaration cannot be parsed, uses a forbidden algorithm or an unregistered key & -- \\
+\code{bad\_signature}, \code{wrong\_audience} & 400 & declaration signature or audience is wrong & -- \\
+\code{expired}, \code{not\_yet\_valid}, \code{lifetime\_too\_long} & 400 & declaration outside its validity window or valid for over 90 days & -- \\
+\code{unknown\_attribute}, \code{retention\_in\_past} & 400 & names outside the vocabulary; deletion date already passed & -- \\
+\code{replayed\_nonce}, \code{kid\_conflict} & 409 & nonce reused; \code{kid} reused for a different key & -- \\
+\code{missing\_token}, \code{invalid\_token} & 401 & no bearer token, or token not valid & -- \\
+\code{no\_declaration} & 403 & declaration missing or belongs to another service & -- \\
+\code{declaration\_expired} & 403 & declaration validity has ended & -- \\
+\code{retention\_passed} & 403 & request after the promised deletion date & rule 2 \\
+\code{attribute\_not\_declared} & 403 & attribute not covered by the declaration & rule 1 \\
+\code{attribute\_above\_tier\_cap} & 403 & attribute above the cap of the service's base tier & rule 3 \\
+\code{attribute\_above\_profile} & 403 & attribute above the current (possibly lowered) profile & -- \\
+\code{unknown\_subject} & 403 & pseudonym cannot be mapped to a student & -- \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{The hash-chained ledger and the student dashboard}
+\label{sec:design-ledger}
+
+\subsubsection{Entry format}
+Every release and every rule-breaking refusal becomes one ledger entry. Since Phase~4 there is a third kind, \code{trust\_reset}, written when an administrator forgives a service. Table~\ref{tab:ledger} lists the fields. Entries hold attribute names and the service's pseudonym for the student, never attribute values and never the student's Keycloak ID. Entry numbers are assigned by TrustTrail as $1, 2, 3, \ldots$, so a missing number is visible.
+
+\begin{table}[t]
+\centering
+\caption{Ledger entry fields}
+\label{tab:ledger}
+\small
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+\toprule
+Field & Content \\
+\midrule
+\code{entry\_id} & 1, 2, 3, \ldots \\
+\code{kind} & \code{release}, \code{violation} or \code{trust\_reset} \\
+\code{rule} & \code{undeclared\_attribute}, \code{after\_retention}, \code{above\_tier\_cap}, or empty \\
+\code{time} & UTC timestamp with microseconds \\
+\code{service\_id} & the service's client ID \\
+\code{student\_pseudonym} & the pairwise \code{sub} at that service (empty for resets and login-time violations) \\
+\code{profile} & profile granted or requested \\
+\code{attributes\_requested} & sorted names the service asked for \\
+\code{attributes\_released} & sorted names released (empty for a violation) \\
+\code{purpose}, \code{retention\_until}, \code{declaration\_id} & copied from the declaration (for a reset, \code{purpose} holds the reason) \\
+\code{service\_signature} & the signature part of the service's declaration JWS \\
+\code{prev\_hash} & \code{entry\_hash} of the previous entry; 64 zeros for entry 1 \\
+\code{entry\_hash} & SHA-256 of the canonical JSON of all fields above \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{Hash chain}
+Let $e_i$ be the content of entry $i$ (all fields except \code{entry\_hash}, including \code{prev\_hash}) and $\mathrm{C}(\cdot)$ the canonical JSON encoding: keys sorted, no whitespace, UTF-8. Then
+\begin{equation}
+h_0 = 0^{256}, \qquad e_i.\mathit{prev\_hash} = h_{i-1}, \qquad h_i = \mathrm{SHA\mbox{-}256}\bigl(\mathrm{C}(e_i)\bigr).
+\end{equation}
+Because every value is a string, an integer or a sorted list of strings, this simple encoding is unambiguous without a full implementation of the JSON Canonicalization Scheme~\cite{rfc8785}. Verification walks the ledger from entry 1, recomputes each hash from the entry's content and stops at the first entry whose number, \code{prev\_hash} or content does not match. SQLite triggers abort any \code{UPDATE} or \code{DELETE} on the ledger table. The triggers only stop changes made through normal use of the database; they are not a security boundary, which is why the hash chain, the receipts and the anchors exist.
+
+A release writes the ledger entry and stores the receipt in one database transaction. If either step fails, nothing is released. All database access goes through one lock, so concurrent releases cannot fork the chain; an integration test runs 10 releases concurrently and checks that the chain stays intact.
+
+\subsubsection{What the chain can and cannot detect}
+The chain on its own detects an entry whose content was changed and whose stored hash was left alone, an entry whose hash was recomputed (the next entry's \code{prev\_hash} no longer matches), and a deleted or reordered entry. It cannot detect two attacks by an insider who controls the whole file: rewriting an entry and recomputing every later hash, and deleting the newest entries. Both leave a chain that is internally consistent. Detecting them needs a hash that is held outside the database. Receipts and anchors provide it, and the evaluation in Section~\ref{sec:eval-tamper} tests all six cases.
+
+\subsubsection{Student dashboard}
+A student logs in to the dashboard through Keycloak with a separate client that does not use a pairwise mapper, so TrustTrail learns the student's real user ID. TrustTrail looks up the student's pseudonym at each service in \code{identity\_map.db} and shows every ledger entry whose (service, pseudonym) pair matches, newest first: the service, the profile, the attributes released or requested, the purpose and the deletion date. Violations appear as highlighted rows. For each entry, a \emph{Verify} button runs up to five checks: the entry matches its hash; the chain is intact up to this entry; the receipt is signed by TrustTrail; the receipt matches the entry; and, once the entry is anchored, its Merkle proof leads to the root stored on chain. A student can download a receipt bundle per entry, or all at once, containing the receipt, its decoded payload, TrustTrail's public key, the ledger entry, the service's original declaration JWS and the Merkle proof. A student can see only their own entries; requests for other entries return 404.
+
+\subsection{Violations, trust score and tier demotion}
+\label{sec:design-trust}
+
+\subsubsection{The three rules}
+TrustTrail can only judge behaviour that it observes. It therefore defines three violation rules, all of which concern requests:
+\begin{enumerate}
+\item \emph{Undeclared attribute}: an explicit request names an attribute that the declaration does not cover. Detected in \code{/release}; refused with \code{attribute\_not\_declared}.
+\item \emph{After retention}: a release is requested under a declaration whose \code{retention\_until} has passed. A service that asks again after the date by which it promised to delete the data is acting outside its promise. Detected in \code{/release}; refused with \code{retention\_passed}.
+\item \emph{Above tier cap}: the service asks for more than its base tier allows. At release time this is an explicit attribute request above the base cap, refused with \code{attribute\_above\_tier\_cap}. At login it is a request for a profile scope above the base cap, which Keycloak refuses with \code{invalid\_scope}. TrustTrail learns of the login case by reading Keycloak's \code{LOGIN\_ERROR} events, whose reason reads ``Invalid scopes: \ldots{} profile-total''. Each event is processed once and its identifier stored.
+\end{enumerate}
+Every rule break is written to the ledger as a \code{violation} entry, with the rule, what was requested and nothing released, and is returned to the service in the refusal together with the entry number.
+
+Two refusals are deliberately \emph{not} violations. A request above the \emph{current} profile but within the base tier's cap is refused as \code{attribute\_above\_profile} without a violation. Likewise, a demoted service that asks Keycloak for a profile that its agreement allows, but its current tier does not, is refused by Keycloak but not counted. Without this distinction, a single violation would demote the service, its next ordinary request would count as another violation, and one mistake would snowball into automatic blocking.
+
+\subsubsection{Score and tier}
+A service's score is computed from facts that TrustTrail can read from Keycloak and from its own ledger:
+\begin{equation}
+\mathit{score} = \max\Bigl(0,\; 100 - 15\cdot[\text{no privacy policy}] - 10\cdot[\text{metadata incomplete}] - 25\cdot v\Bigr),
+\end{equation}
+where $[\cdot]$ is 1 if the condition holds. ``No privacy policy'' means the Keycloak client has no \code{policyUri}; ``metadata incomplete'' means any of \code{name}, \code{description}, \code{rootUrl} or \code{tosUri} is missing; $v$ is the number of violations in the last 90 days that came after the service's most recent trust reset. The tier is the base tier moved down one step for every full 25 points below 100:
+\begin{equation}
+d = \left\lfloor \frac{100 - \mathit{score}}{25} \right\rfloor, \qquad \mathit{tier} = \mathit{order}\bigl[\max(\mathrm{index}(\mathit{base}) - d,\; 0)\bigr],
+\end{equation}
+with $\mathit{order} = [\textit{blocked}, \textit{untrusted}, \textit{semi\_trusted}, \textit{fully\_trusted}]$. One violation therefore costs exactly one tier. A missing privacy policy alone (score 85) costs nothing, but together with incomplete metadata (score 75) it costs one tier. The configuration file states that every number is a starting value to tune, not a validated constant; we return to this in Section~\ref{sec:discussion}.
+
+\subsubsection{Enforcement}
+After every violation, and every 3\,s in a background thread, the trust engine recomputes each service's tier and makes Keycloak match it. It reads the service client's optional \code{profile-*} scopes through the Admin API, adds the missing ones and removes those above the cap. Because the background loop re-applies the cap continuously, a re-seeded or hand-edited Keycloak cannot silently undo a demotion. The cap is also applied a second time at release: a token issued before a demotion still carries the old profile in its \code{scope}, so \code{/release} lowers the profile to the current cap. An administrator can reset a service's trust, for example after the institute and the service have resolved a complaint; the reset is itself written to the ledger with its reason, and violations before it no longer count.
+
+\subsection{Merkle anchoring on Ethereum}
+\label{sec:design-anchoring}
+
+\subsubsection{Batches and Merkle roots}
+Every 300\,s by default, the anchoring thread asks the contract for the last anchored entry number and reads up to 5{,}000 newer entries from the ledger. If there are none, it sends no transaction. Otherwise it builds a Merkle tree over their entry hashes following RFC~6962~\cite{rfc6962}:
+\begin{equation}
+\mathit{leaf}_i = \mathrm{SHA\mbox{-}256}(\mathtt{0x00} \,\|\, h_i), \qquad \mathit{node} = \mathrm{SHA\mbox{-}256}(\mathtt{0x01} \,\|\, \mathit{left} \,\|\, \mathit{right}).
+\end{equation}
+Adjacent nodes are paired level by level; an odd node at the end of a level is promoted unchanged. Promotion avoids a weakness of duplicating the last node, with which two different batches can share a root. The thread then calls \code{anchor(root, first, last)} and waits for the transaction receipt. All entry kinds are anchored, including violations and trust resets. Figure~\ref{fig:merkle} illustrates a batch.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\scriptsize,
+  e/.style={draw, minimum width=13mm, minimum height=7mm, align=center},
+  n/.style={draw, circle, inner sep=1pt, minimum size=7mm},
+  >=Stealth]
+\foreach \i/\x in {1/0, 2/1.8, 3/3.6, 4/5.4, 5/7.2}{
+  \node[e] (e\i) at (\x,0) {entry \i\\$h_{\i}$};
+}
+\foreach \i in {2,3,4,5}{ \pgfmathtruncatemacro{\j}{\i-1}
+  \draw[->] (e\j.east) -- (e\i.west);}
+\node[font=\tiny, above=0mm of e2.north west, anchor=south east] {\code{prev\_hash}};
+\foreach \i/\x in {1/0, 2/1.8, 3/3.6, 4/5.4, 5/7.2}{
+  \node[n] (l\i) at (\x,1.4) {$\ell_{\i}$};
+  \draw[->] (e\i) -- (l\i);
+}
+\node[n] (n12) at (0.9,2.6) {}; \draw[->] (l1) -- (n12); \draw[->] (l2) -- (n12);
+\node[n] (n34) at (4.5,2.6) {}; \draw[->] (l3) -- (n34); \draw[->] (l4) -- (n34);
+\node[n] (n14) at (2.7,3.8) {}; \draw[->] (n12) -- (n14); \draw[->] (n34) -- (n14);
+\draw[->, dashed] (l5) -- (7.2,3.8);
+\node[n, fill=black!8] (root) at (5,5.0) {root}; \draw[->] (n14) -- (root); \draw[->] (7.2,3.8) -- (root);
+\node[draw, rounded corners=2pt, align=left, anchor=west] (sc) at (8.6,5.0) {\code{anchor(root, 1, 5)}\\on \code{TrustTrailAnchor}};
+\draw[->] (root) -- (sc);
+\node[anchor=west, align=left] at (8.6,1.4) {$\ell_i = \mathrm{H}(\mathtt{00} \| h_i)$\\node $= \mathrm{H}(\mathtt{01} \| L \| R)$\\$\ell_5$ promoted (odd)};
+\end{tikzpicture}
+\caption{A batch of five hash-chained ledger entries summarised as one Merkle root and anchored on chain. The proof for entry~3 is the sibling hashes $\ell_4$, the node over $\ell_1,\ell_2$, and $\ell_5$.}
+\label{fig:merkle}
+\end{figure}
+
+\subsubsection{The anchor contract}
+Listing~\ref{lst:contract} shows the core of the \code{TrustTrailAnchor} contract (56 lines in total). It stores one record per batch: the root, the first and last entry numbers, and the block timestamp. Three rules make it a reliable reference. Only the owner, the account that deployed the contract and whose key TrustTrail holds, can anchor. A batch must cover at least one entry. And a batch must start exactly one entry after the previous batch ended, starting at entry~1. The last rule means the batches always cover the ledger from the first entry without gaps or overlaps, so anyone can see which entries are anchored, and a ledger that ends before the last anchored entry is visibly truncated. The contract has no function that changes or deletes a batch; a contract test checks that \code{anchor} is the only function that writes state. Only hashes and numbers go on chain, never personal data.
+
+\begin{lstlisting}[caption={Core of the anchor contract (Solidity 0.8.28)}, label={lst:contract}]
+struct Batch { bytes32 root; uint64 firstEntryId; uint64 lastEntryId; uint64 anchoredAt; }
+address public immutable owner;
+Batch[] private batches;
+event Anchored(uint256 indexed batchId, bytes32 root,
+               uint64 firstEntryId, uint64 lastEntryId, uint64 anchoredAt);
+
+function anchor(bytes32 root, uint64 firstEntryId, uint64 lastEntryId)
+    external returns (uint256 batchId) {
+  if (msg.sender != owner) revert NotOwner();
+  if (lastEntryId < firstEntryId) revert EmptyRange();
+  uint64 expected = batches.length == 0 ? 1 : batches[batches.length - 1].lastEntryId + 1;
+  if (firstEntryId != expected) revert NotContiguous(expected);
+  batchId = batches.length;
+  uint64 timestamp = uint64(block.timestamp);
+  batches.push(Batch(root, firstEntryId, lastEntryId, timestamp));
+  emit Anchored(batchId, root, firstEntryId, lastEntryId, timestamp);
+}
+\end{lstlisting}
+
+\subsubsection{Proofs and verification}
+\code{GET /ledger/proof/\{id\}} returns, for an anchored entry, its hash, the sibling hashes on the path to the root with their side, the batch, the contract address and the chain ID. It reveals no other entry's content. For an entry that is not yet anchored it returns \code{anchored: false} and the time until the next batch. \code{GET /anchors/verify} recomputes every anchored root from the ledger and compares it with the chain.
+
+Verification always recomputes the leaf from the entry's \emph{content}, not from the stored hash, so an edited entry whose stored hash was left unchanged also fails. A student can verify a downloaded receipt bundle without contacting TrustTrail, using a script that needs only the bundle file and a chain endpoint: it checks the receipt signature, checks that the ledger entry matches the receipt, recomputes the Merkle root from the proof, reads the batch from the contract and compares the roots and the entry range.
+
+\subsubsection{The anchoring window}
+An entry is protected by its anchor only after the next batch, which is up to one interval (300\,s by default) plus the time to confirm the transaction. During this window, the entry is protected by the hash chain and by the receipt that its student may hold. The interval is a trade-off between cost (one transaction per interval when there is traffic) and the length of the window; Section~\ref{sec:eval-anchoring} measures both.
+
+\subsection{The release algorithm}
+\label{sec:design-release}
+
+Algorithm~\ref{alg:release} brings the mechanisms together. The order of checks matters. The token and declaration are checked before anything else, so an unauthenticated caller cannot create ledger entries. The retention check comes before the attribute checks, so a service past its deletion date is told so whatever it asks for. When the service does not name attributes, TrustTrail releases the intersection of the declared attributes and the current profile, and this default request can never be a violation.
+
+\begin{algorithm}[t]
+\caption{\code{POST /release}}
+\label{alg:release}
+\begin{algorithmic}[1]
+\Require bearer access token $t$; declaration ID $\delta$; optional attribute list $R$
+\State verify $t$ with Keycloak's JWKS (RS256, issuer, type Bearer) \Comment{else 401}
+\State $s \gets t.\mathit{azp}$; $D \gets$ declaration $\delta$ \Comment{else 403 \code{no\_declaration} if missing or $D.\mathit{client} \neq s$}
+\State $g \gets$ highest \code{profile-*} in $t.\mathit{scope}$ (\textit{anonymous} if none)
+\State $p \gets \min(g, \mathrm{cap}(\mathrm{tier}(s)))$ \Comment{tokens issued before a demotion get today's cap}
+\If{$\mathit{now} > D.\mathit{exp}$} \State \Return 403 \code{declaration\_expired} \EndIf
+\If{$\mathit{now} > D.\mathit{retention\_until}$} \State record violation (rule 2); \Return 403 \code{retention\_passed} \EndIf
+\If{$R = \bot$} \State $A \gets D.\mathit{attributes} \cap \mathrm{attrs}(p)$
+\Else
+  \If{$R \not\subseteq D.\mathit{attributes}$} \State record violation (rule 1); \Return 403 \code{attribute\_not\_declared} \EndIf
+  \If{$R \not\subseteq \mathrm{attrs}(\mathrm{cap}(\mathrm{base}(s)))$} \State record violation (rule 3); \Return 403 \code{attribute\_above\_tier\_cap} \EndIf
+  \If{$R \not\subseteq \mathrm{attrs}(p)$} \State \Return 403 \code{attribute\_above\_profile} \Comment{no violation} \EndIf
+  \State $A \gets R$
+\EndIf
+\State $u \gets$ student for $(s, t.\mathit{sub})$ in identity map \Comment{else 403 \code{unknown\_subject}}
+\State $V \gets$ values of $A$ for $u$ from Keycloak ($\code{sub} \mapsto t.\mathit{sub}$)
+\State \textbf{in one transaction:} append ledger entry; sign receipt $\rho$; store $\rho$
+\State \Return $(p, V, \rho)$
+\end{algorithmic}
+\end{algorithm}

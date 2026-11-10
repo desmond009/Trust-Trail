@@ -4,7 +4,7 @@
 \ifXeTeX
   \usepackage{fontspec}
   \setmainfont{texgyretermes}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
-  \setmonofont{texgyrecursor}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic, Scale=0.95]
+  \setmonofont{texgyrecursor}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic, Scale=0.95, Ligatures={NoCommon,NoRequired,NoContextual}]
 \else
   \usepackage[utf8]{inputenc}
   \usepackage[T1]{fontenc}
@@ -58,18 +58,18 @@
 \input{sections/04-related-work}
 \input{sections/05-threat-model}
 \input{sections/06-architecture}
-% \input{sections/07-design}
-% \input{sections/08-implementation}
-% \input{sections/09-evaluation}
-% \input{sections/10-discussion}
-% \input{sections/11-future-work}
-% \input{sections/12-conclusion}
-% \input{sections/13-backmatter}
+\input{sections/07-design}
+\input{sections/08-implementation}
+\input{sections/09-evaluation}
+\input{sections/10-discussion}
+\input{sections/11-future-work}
+\input{sections/12-conclusion}
+\input{sections/13-backmatter}
+
+\appendices
+\input{sections/appendix}
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
-
-% \appendices
-% \input{sections/appendix}
 
 \end{document}

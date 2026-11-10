@@ -1,0 +1,20 @@
+\section{Future Work}
+\label{sec:future}
+
+\subsection{Usability study}
+TrustTrail's transparency and user-friendliness are claims about people, which our evaluation does not test. We have designed a usability study, and its materials and analysis scripts are implemented, but it has not yet been run. It compares two consent screens: Keycloak's default consent screen, which lists scopes such as ``Email address'' and ``User profile'' with Yes and No buttons, and a TrustTrail prototype screen that shows the service's declared purpose, its trust tier, the date of its signed promise, the deletion date, the attributes that are always shared, and a checkbox for each optional attribute with nothing pre-ticked.
+
+The design is within-subject: each participant uses both screens in two scenarios, for four tasks in total, with the order of screens and scenarios counterbalanced across four groups. In one scenario (the Learning System, semi-trusted, data kept for 180 days) the intended choice is to share department, programme and year but not e-mail address or roll number; in the other (the Examination Portal, fully trusted, 365 days) the intended choice is to share everything. Participants act as an invented student, so no real personal data is involved. For each task the study records whether the participant made the intended choice, the decision time, and whether they could correctly say which attributes the service now holds; for each screen it asks what the purpose was, how long the data will be kept, and three five-point agreement items. Comprehension will be compared between the two screens with a paired exact sign test.
+
+Two points limit what the study can show. The per-attribute choice exists only in the prototype screen, so the study tests an interface that the running system does not yet have. And the scenario that asks for a partial share is impossible on Keycloak's screen by design, so comprehension, not choice, is the fair comparison. We plan to recruit 15 to 20 classmates after checking whether the institute requires ethics approval, and to report the study separately.
+
+\subsection{Further directions}
+\begin{itemize}
+\item \emph{Student choice at release.} Bringing the prototype's per-attribute choice into the release flow would add controllability, the characteristic on which TrustTrail scores lowest against the survey's taxonomy. The declaration would then bound what a service may ask for, and the student would choose within that bound.
+\item \emph{Public-chain deployment.} Deploying the anchor contract on Sepolia, and later on a public main network or a low-cost layer-2 network, would turn the anchors into evidence that outsiders can check, and allow us to measure real confirmation delays and fees.
+\item \emph{Consistency proofs.} Adding Certificate Transparency's consistency proofs~\cite{rfc9162} would let a student who holds an old root check that the ledger only grew, without downloading it.
+\item \emph{Selective-disclosure credentials.} Issuing attributes as verifiable credentials with selective disclosure~\cite{w3cvc2} could remove TrustTrail from the path of attribute values while keeping declarations and the ledger, and would hide the student's pseudonym map from the operator.
+\item \emph{Federations with several IdPs.} Extending tiers and declarations across institutions, for example for shared library or examination services, raises the agreement questions that the survey describes for dynamic federations.
+\item \emph{Independent scoring.} The taxonomy assessment in Table~\ref{tab:taxonomy} should be repeated by assessors who did not build TrustTrail.
+\item \emph{Load testing and hardening.} Measuring throughput under concurrent load, moving the ledger to a server database, narrowing TrustTrail's Keycloak permissions, and running Keycloak in production mode.
+\end{itemize}

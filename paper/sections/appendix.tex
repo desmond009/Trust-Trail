@@ -1,0 +1,107 @@
+\section{API Reference}
+\label{app:api}
+
+All refusals have the form \code{\{"error": "<code>", "detail": "<text>"\}}; refusals that break a rule at \code{/release} also carry \code{"violation": \{"rule", "entry\_id"\}}. Table~\ref{tab:refusals} lists the codes.
+
+\begin{lstlisting}[caption={Requests and responses of the main endpoints}, label={lst:api}]
+POST /services/keys            Authorization: Bearer <client-credentials token>
+  {"keys": [{"kty":"EC","crv":"P-256","x":"...","y":"...",
+             "kid":"<RFC 7638 thumbprint>","alg":"ES256","use":"sig"}]}
+  -> 200 {"client_id": "lms", "kids": ["..."]}
+
+POST /declarations             (no bearer token; the JWS signature authenticates)
+  {"declaration": "<compact JWS, typ purpose-declaration+jwt>"}
+  -> 201 {"declaration_id", "client_id", "nonce", "attributes", "purpose",
+          "retention_until", "issued_at", "expires_at", "kid", "jws", "jws_sha256"}
+
+POST /release                  Authorization: Bearer <student's access token>
+  {"declaration_id": "226617abd0d39a21", "attributes": ["sub", "department"]}
+  -> 200 {"service": "lms", "profile": "partial",
+          "declaration_id": "226617abd0d39a21", "entry_id": 12,
+          "released": {"sub": "97d4...", "department": "Computer Science"},
+          "receipt": "<JWS, typ release-receipt+jwt>"}
+
+GET /ledger/proof/{entry_id}
+  -> {"entry_id", "anchored": true, "entry_hash",
+      "proof": [{"hash", "side": "left"|"right"}, ...],
+      "batch": {"batch_id", "first_entry_id", "last_entry_id", "root",
+                "tx_hash", "block_number", "gas_used", "anchored_at", ...},
+      "network", "chain_id", "contract"}
+  -> {"entry_id", "anchored": false, "last_anchored_entry_id",
+      "next_anchor_within_seconds"}              (not yet anchored)
+
+GET /anchors/verify
+  -> {"ok", "batches_checked", "anchored_up_to", "unanchored_entries",
+      "failures": [{"batch_id", "reason"}]}
+
+GET /trust
+  -> {"<service>": {"score", "privacy_policy_declared", "missing_metadata",
+                    "violations", "demotions", "base_tier", "tier", "cap",
+                    "violations_by_rule"}, ...}
+\end{lstlisting}
+
+The receipt payload contains \code{iss}, \code{iat}, \code{jti}, \code{service}, \code{profile}, \code{attributes} (names only), \code{subject} (only if the pseudonym was released), \code{purpose}, \code{retention\_until}, \code{declaration\_id}, \code{declaration\_sha256}, \code{entry\_id}, \code{entry\_hash} and \code{released\_at}. A receipt bundle downloaded from the dashboard contains the receipt JWS and its decoded payload, TrustTrail's public key set, the ledger entry, the service's declaration JWS and the Merkle proof.
+
+\section{Configuration Files}
+\label{app:config}
+
+\begin{lstlisting}[caption={\code{config/profiles.yaml}}, label={lst:profiles}]
+order: [anonymous, pseudonym, partial, total]
+profiles:
+  anonymous: {sub: false, attributes: [affiliation]}
+  pseudonym: {sub: true,  attributes: [affiliation]}
+  partial:   {sub: true,  attributes: [affiliation, department, program, year]}
+  total:     {sub: true,  attributes: [affiliation, department, program, year,
+                                       name, email, roll_no]}
+\end{lstlisting}
+
+\begin{lstlisting}[caption={\code{config/trust.yaml} (comments shortened)}, label={lst:trust}]
+# Every number here is a starting value to tune, not a validated constant.
+tiers:
+  fully_trusted: total
+  semi_trusted: partial
+  untrusted: pseudonym
+  blocked: anonymous
+tier_order: [blocked, untrusted, semi_trusted, fully_trusted]
+score:
+  start: 100
+  no_privacy_policy: 15
+  incomplete_metadata: 10
+  required_metadata: [name, description, rootUrl, tosUri]
+  violation_step: 25
+  tier_band: 25
+  violation_window_days: 90
+sync_seconds: 3
+\end{lstlisting}
+
+\begin{lstlisting}[caption={\code{config/declarations.yaml} and \code{config/anchoring.yaml}}, label={lst:decl-anchor}]
+audience: trusttrail
+algorithms: [ES256, RS256]        # never "none" or HMAC
+max_lifetime_days: 90
+clock_skew_seconds: 30
+max_purpose_length: 500
+
+interval_seconds: 300             # ANCHOR_INTERVAL_SECONDS overrides
+max_batch_entries: 5000
+receipt_timeout_seconds: 180
+\end{lstlisting}
+
+\section{Reproducing the Results}
+\label{app:repro}
+
+\begin{lstlisting}[caption={Commands to run the system, the tests and the evaluation}, label={lst:repro}]
+cp .env.example .env                    # local demo values only
+docker compose up -d --build            # Keycloak, chain, TrustTrail, services
+docker compose run --rm trusttrail python -m scripts.seed   # (re)creates the realm
+
+docker compose exec trusttrail pytest   # 94 unit + 55 integration tests
+docker compose run --rm chain-deploy npx hardhat test       # 6 contract tests
+scripts/check_browser_sso.sh            # browser-level unlinkability check
+scripts/check_dashboard.sh              # dashboard and receipt check
+
+docker compose exec trusttrail sh eval/run_all.sh           # latency, tamper,
+                                                            # violations (~3 min)
+docker compose exec trusttrail python -m scripts.demo_phase5 \
+    --batches 3 --interval 12           # anchoring gas and delay
+docker compose exec trusttrail python -m scripts.verify_anchors
+\end{lstlisting}

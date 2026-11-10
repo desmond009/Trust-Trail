@@ -1,0 +1,66 @@
+\section{Introduction}
+\label{sec:intro}
+
+\IEEEPARstart{A}{university} runs many online services for its students: a digital library, a learning management system (LMS), an examination portal, and often third-party applications as well. Identity federation and single sign-on (SSO) made this manageable: the student logs in once at an identity provider (IdP), and each service, called a relying party, accepts the IdP's assertion instead of keeping its own password database~\cite{birrell2013federated,ferdous2015dynamic}. Protocols such as SAML~2.0~\cite{saml2core} and OpenID Connect (OIDC)~\cite{oidccore} on top of OAuth~2.0~\cite{rfc6749} are mature, and open-source IdPs such as Keycloak~\cite{keycloakdocs} make SSO cheap to deploy.
+
+SSO solves the login problem. It does little for privacy, and in some ways it makes privacy worse. The project started from a simple question: what does a typical campus SSO configuration actually send to each service? The answer shows three problems.
+
+\emph{Over-release.} The easiest configuration gives every client the same set of claims: name, e-mail address, roll number, department and year. The library needs to know that the borrower is a current student. It does not need the student's name, and it certainly does not need the roll number. Studies of permission systems show that applications routinely ask for more than they need when nothing stops them~\cite{felt2011permissions,chen2014oauth}.
+
+\emph{Linkability.} If the IdP gives every service the same subject identifier, or the same e-mail address, any two services can join their records. Even when identifiers differ, a session identifier shared across clients in one SSO session can link them, as we show in Section~\ref{sec:design}. Unlinkability is one of the three privacy properties that Birrell and Schneider identify for federated identity~\cite{birrell2013federated}, and it is the one that a default deployment gives up first.
+
+\emph{No record and no recourse.} After a release, the student cannot find out which service received which attribute, for what purpose, or until when. If a service later asks for something it never said it needed, nobody notices, and the service keeps the same access as before. Data protection law expects the opposite. The EU General Data Protection Regulation requires that personal data be collected for specified purposes, limited to what is necessary, kept no longer than necessary, and that the controller be able to demonstrate compliance~\cite{gdpr2016}. India's Digital Personal Data Protection Act, 2023 likewise ties processing to a specified purpose and requires erasure once that purpose is no longer served~\cite{dpdp2023}. These are statements about what should happen. A campus IdP gives no evidence of whether it did.
+
+Our starting point was the survey by Werner, Westphall and Westphall, ``Cloud identity management: A survey on privacy strategies''~\cite{werner2017survey}. The survey proposes a taxonomy of nine privacy characteristics for identity management (transparency, controllability, minimization, accountability, data quality, use limitation, user-friendliness, trust and obfuscation), maps 23 published proposals and six European research projects against it, and lists open challenges. Reading its tables closely, we found that the two characteristics that matter most for the third problem are also the least covered. Only 2 of the 23 proposals address accountability and only 5 address use limitation; the four works the authors themselves present as solutions in progress address neither~\cite[Tables~2--3]{werner2017survey}. The survey also names ``ensure the implementation of policies'' as an open challenge and observes that several surveyed proposals were never implemented or validated. Section~\ref{sec:basepaper} analyses the survey in detail.
+
+This paper presents \emph{TrustTrail}, a system that addresses these gaps for an OIDC federation and that we built and evaluated end to end. TrustTrail keeps the IdP unmodified in its protocol behaviour and adds a disclosure layer beside it. Its design follows one loop:
+\begin{center}
+\emph{signed promise $\rightarrow$ ledger record $\rightarrow$ violation detected $\rightarrow$ trust lowered $\rightarrow$ less data released.}
+\end{center}
+A service first signs a purpose declaration that names the attributes it wants, why it wants them and when it will delete them. TrustTrail releases attribute values only under such a declaration and only up to the disclosure profile that the service's current trust tier allows. Every release, and every refused request that breaks a rule, becomes an entry in a hash-chained ledger. Batches of ledger entries are summarised as Merkle roots and anchored in an Ethereum smart contract, so the history cannot be quietly rewritten even by the operator. A service that breaks a rule loses trust, and the IdP stops granting it the more revealing profiles.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=2pt, align=center, minimum width=27mm, minimum height=9mm, font=\small},
+  lab/.style={font=\scriptsize, align=center}]
+\node[box] (st) at (0,0) {Student\\(one SSO login)};
+\node[box] (idp) at (4.5,0) {Campus IdP};
+\node[box] (lib) at (11,1.6) {Library};
+\node[box] (lms) at (11,0) {LMS};
+\node[box] (exam) at (11,-1.6) {Exam portal};
+\draw[-{Stealth}] (st) -- node[lab, above] {login} (idp);
+\draw[-{Stealth}] (idp.east) -- (lib.west);
+\draw[-{Stealth}] (idp.east) -- (lms.west);
+\draw[-{Stealth}] (idp.east) -- (exam.west);
+\node[lab, fill=white, inner sep=2pt] at (7.6,0) {each service receives\\\code{sub=u42}, name, roll no.};
+\draw[dashed, {Stealth}-{Stealth}] (lib.east) to[bend left=50] node[lab, right] {join\\on u42} (exam.east);
+\end{tikzpicture}
+\caption{The problem in a default SSO deployment. Every service receives the same identifier and the same personal claims, whatever it needs, so services can join their records; the student has no record of the releases.}
+\label{fig:problem}
+\end{figure}
+
+\subsection{Research questions}
+We framed the work around five questions.
+\begin{enumerate}
+\item[\textbf{RQ1}] Can a federation give each service only the attributes of an agreed disclosure profile, and stop services from linking a student across services, while the IdP keeps speaking standard OIDC?
+\item[\textbf{RQ2}] Can every release be bound to a purpose and a deletion date that the service has signed, so that a service cannot later deny what it promised?
+\item[\textbf{RQ3}] Can the record of releases be made tamper-evident against an insider who controls the database, including the operator, without putting personal data on a public ledger?
+\item[\textbf{RQ4}] Can rule-breaking that the disclosure layer can observe automatically reduce what the offending service receives in future?
+\item[\textbf{RQ5}] What do these mechanisms cost in login latency and in blockchain fees?
+\end{enumerate}
+
+\subsection{Contributions}
+\begin{enumerate}
+\item A gap analysis of Werner et al.~\cite{werner2017survey} that uses the survey's own tables to show where its taxonomy is least covered, and that maps each of its five open challenges to a concrete design requirement (Section~\ref{sec:basepaper}).
+\item A design that splits disclosure between the IdP and a separate release service: Keycloak decides \emph{which} profile a service may obtain, using per-service scope assignment as a tier cap, pairwise subject identifiers and a custom protocol mapper that removes the shared session identifier; TrustTrail decides \emph{what} the profile contains and is the only path for attribute values (Sections~\ref{sec:architecture} and~\ref{sec:design}).
+\item Signed purpose declarations and release receipts based on JSON Web Signatures~\cite{rfc7515}, which bind every release to the attributes, purpose and deletion date that the service promised, and give the student portable, verifiable evidence of each release.
+\item An accountability chain made of a hash-chained ledger, per-release receipts and Merkle-root anchoring in an Ethereum contract that only accepts contiguous batches, with a verification procedure that a student can run using only a downloaded receipt and the chain.
+\item A dynamic trust model in which three observable violation rules lower a service's score and its tier, and the tier is enforced both at the IdP (login is refused) and at the release service (already issued tokens get the lower cap).
+\item An open implementation (Keycloak~26.8.1, Python~3.12/FastAPI, Solidity~0.8.28, Hardhat~3) with 149 Python tests and 6 contract tests, and an evaluation of latency, tamper detection, violation detection and anchoring cost (Sections~\ref{sec:implementation} and~\ref{sec:evaluation}).
+\end{enumerate}
+
+We are careful about what TrustTrail does not do. It records what a service promised and what it received, and it refuses releases that break the promise. It cannot see what a service does with data afterwards, so it cannot prove deletion. The IdP still sees every login. Section~\ref{sec:discussion} discusses these and other limits.
+
+\subsection{Organisation}
+Section~\ref{sec:background} introduces the protocols and primitives that TrustTrail builds on. Section~\ref{sec:basepaper} analyses the base survey and derives the gaps we address, and Section~\ref{sec:related} reviews related work. Section~\ref{sec:threat} states the threat model and design goals. Sections~\ref{sec:architecture} and~\ref{sec:design} present the architecture and the detailed design, and Section~\ref{sec:implementation} the implementation. Section~\ref{sec:evaluation} reports the evaluation. Sections~\ref{sec:discussion}, \ref{sec:future} and~\ref{sec:conclusion} discuss limitations, future work and conclusions.

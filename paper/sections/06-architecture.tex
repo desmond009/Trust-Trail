@@ -1,0 +1,144 @@
+\section{System Architecture}
+\label{sec:architecture}
+
+This section describes TrustTrail's components, the data each holds, and how a release flows through them. Section~\ref{sec:design} then describes each mechanism in detail.
+
+\subsection{Design principle: the IdP decides \emph{which}, TrustTrail decides \emph{what}}
+TrustTrail splits the disclosure decision between two components. Keycloak decides \emph{which} profile a service may obtain: a service's Keycloak client is assigned only the profile scopes up to its tier cap, so a login that asks for more fails at the IdP. The tokens that Keycloak issues to services carry a pairwise \code{sub}, the granted scope and no personal claims. TrustTrail decides \emph{what} that profile contains, and it is the only path by which a service obtains attribute values: the service presents the student's access token to TrustTrail's \code{/release} endpoint and receives the values that its profile and its declaration allow.
+
+We chose this split for three reasons. First, it keeps the IdP standard. Services run an ordinary OIDC authorisation code flow, and the only change to Keycloak is one small protocol mapper and configuration through its Admin API. Second, it puts every release through a single point where the declaration can be checked and the ledger written. If attributes travelled in the ID token, the IdP would release them before any purpose check, and nobody would record the release. Third, it separates the two kinds of state. Keycloak keeps the student records it already had; TrustTrail keeps declarations, the ledger and trust state, and never stores attribute values.
+
+\subsection{Components}
+Figure~\ref{fig:components} shows the components and their connections. All run as Docker containers defined in one Compose file.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  comp/.style={draw, rounded corners=2pt, align=center, minimum height=11mm, inner sep=4pt},
+  store/.style={draw, cylinder, shape border rotate=90, aspect=0.15, align=center, minimum height=9mm, inner sep=3pt, font=\scriptsize},
+  lab/.style={font=\scriptsize, align=center, fill=white, inner sep=1.5pt},
+  arr/.style={-{Stealth}}]
+\node[comp, minimum width=28mm] (student) at (-1.5,0) {Student\\(browser)};
+\node[comp, minimum width=40mm] (kc) at (6.5,0) {Keycloak 26.8.1, realm \code{trusttrail}\\+ \code{strip-sid} mapper};
+\node[comp, minimum width=28mm] (ver) at (13,0) {Verifier\\(receipt + chain)};
+\node[comp, minimum width=28mm] (svc) at (-1.5,-4) {Services\\library, LMS, exam};
+\node[comp, minimum width=52mm] (tt) at (6.5,-4) {\textbf{TrustTrail} (FastAPI)\\ \scriptsize release API, declarations, receipts,\\ \scriptsize ledger, trust engine, anchorer, dashboard};
+\node[comp, minimum width=28mm] (chain) at (13,-4) {Ethereum chain\\\code{TrustTrailAnchor}};
+\node[store] (db) at (4.6,-6.6) {\code{trusttrail.db}\\ledger, declarations};
+\node[store] (map) at (8.4,-6.6) {\code{identity\_map.db}\\student $\leftrightarrow$ pseudonym};
+\draw[arr] (student) -- node[lab, above] {login (SSO)} (kc);
+\draw[arr] (student) -- node[lab, left] {uses} (svc);
+\draw[arr] (svc.north east) -- node[lab, pos=0.78] {OIDC code flow} (kc.south west);
+\draw[arr] (student.south east) -- node[lab, pos=0.8] {dashboard} (tt.north west);
+\draw[arr] (svc) -- node[lab, below=1mm] {keys, declarations,\\\code{/release}} (tt);
+\draw[arr] (tt) -- node[lab] {JWKS, Admin API,\\events, scope caps} (kc);
+\draw[arr] (tt) -- node[lab, above] {Merkle roots} (chain);
+\draw[arr] (ver) -- node[lab, right] {\code{getBatch}} (chain);
+\draw[arr] (tt.south) ++(-1,0) -- (db.north);
+\draw[arr] (tt.south) ++(1,0) -- (map.north);
+\end{tikzpicture}
+\caption{TrustTrail components. Services speak standard OIDC to Keycloak and obtain attribute values only from TrustTrail. TrustTrail keeps the student-to-pseudonym map in a separate database from the ledger, and publishes only Merkle roots to the chain.}
+\label{fig:components}
+\end{figure}
+
+\subsubsection{Keycloak}
+Keycloak~26.8.1 is the IdP. A seed script creates the realm \code{trusttrail} through the Admin REST API. The realm defines four client scopes, \code{profile-anonymous}, \code{profile-pseudonym}, \code{profile-partial} and \code{profile-total}, which carry no claim mappers: their only effect is to appear in the token's \code{scope} claim. Each service client has every default scope removed except \code{basic}, and has as optional scopes only the profiles up to its tier cap. Each service client also has two protocol mappers: Keycloak's SHA-256 pairwise subject mapper and TrustTrail's custom \code{trusttrail-strip-sid-mapper}, a 72-line Java class that removes the session identifier from ID and access tokens. Keycloak records only \code{LOGIN\_ERROR} events, which TrustTrail reads to detect over-cap login attempts.
+
+\subsubsection{TrustTrail}
+TrustTrail is a Python~3.12 application built with FastAPI. Its 20 modules (about 2{,}200 lines) implement:
+\begin{itemize}
+\item the \emph{release API}, which verifies the student's access token, the declaration and the tier cap, and returns attribute values;
+\item \emph{declarations}, which verifies and stores services' signed purpose declarations and their public keys;
+\item \emph{receipts}, which signs a receipt for each release with TrustTrail's ES256 key;
+\item the \emph{ledger}, an append-only, hash-chained SQLite table;
+\item the \emph{trust engine}, which computes each service's score and tier and applies the tier's cap to the service's Keycloak client;
+\item the \emph{anchorer}, which periodically builds a Merkle tree over new ledger entries and sends its root to the contract;
+\item the \emph{dashboard}, where a student logs in and sees, verifies and downloads the record of every release concerning them.
+\end{itemize}
+Two background threads run inside TrustTrail: the trust thread synchronises with Keycloak every 3\,s, and the anchoring thread runs every 300\,s by default.
+
+\subsubsection{Services}
+Three invented campus services, a Digital Library, a Learning System and an Examination Portal, demonstrate honest behaviour. They share one small FastAPI application (136 lines) configured by a service identifier. Three further scripted services, which we call Campus Deals, Alumni Tracker and Career Portal, each break one rule on purpose and are used in the evaluation.
+
+\subsubsection{Chain}
+A local Hardhat~3 node runs an in-memory Ethereum chain, and a one-shot container deploys the \code{TrustTrailAnchor} contract (Solidity~0.8.28) and writes its address and ABI to a deployment file that TrustTrail reads. The same contract can be deployed to the Sepolia test network by changing configuration.
+
+\subsection{Data stores and trust boundaries}
+Each party holds a different part of the state, which limits what any single compromised store reveals.
+\begin{itemize}
+\item \emph{Keycloak} holds the student records (name, e-mail, roll number, department, programme, year, affiliation), the client definitions and each client's random pairwise salt.
+\item \emph{\code{trusttrail.db}} holds service public keys, declarations, the ledger, stored receipts, trust state, cached anchor metadata and processed event identifiers. The ledger contains attribute \emph{names}, pseudonyms and hashes, never attribute values and never a student's real user ID.
+\item \emph{\code{identity\_map.db}} is a separate file that maps each (service, pseudonym) pair to the Keycloak user ID. It is needed to fetch attribute values and to show a student their own entries. Keeping it apart from the ledger means the ledger can be inspected, exported or audited without revealing who is who.
+\item TrustTrail's receipt-signing key, an EC P-256 private key, is generated on first use into TrustTrail's data volume with file mode 0600. Each service's declaration-signing key is generated into a volume that only the services mount. No private key is stored in the source repository.
+\item The \emph{chain} holds, per batch, a 32-byte root, the first and last entry numbers and a timestamp.
+\end{itemize}
+
+\subsection{End-to-end flow}
+Figure~\ref{fig:sequence} shows the life of one release, from a service's setup to a student's verification. The steps are:
+\begin{enumerate}
+\item \emph{Key registration.} The service obtains a client-credentials token from Keycloak and registers its public JWK at TrustTrail.
+\item \emph{Declaration.} The service signs a purpose declaration and submits it; TrustTrail verifies and stores it and returns its identifier.
+\item \emph{Login.} The student opens the service, which redirects to Keycloak asking for \code{openid profile-<x>}. Keycloak authenticates the student, or reuses the SSO session, and grants the profile only if it is assigned to the client. The service exchanges the code for tokens that carry the pairwise \code{sub}, no \code{sid} and no personal claims.
+\item \emph{Release.} The service calls \code{POST /release} with the student's access token and the declaration identifier. TrustTrail checks the token, the declaration, the deletion date and the tier cap, maps the pseudonym to the student, fetches the attribute values from Keycloak, and in one database transaction appends a ledger entry and signs a receipt. It returns the values and the receipt.
+\item \emph{Anchoring.} At the next anchoring interval, TrustTrail computes the Merkle root of all entries since the last batch and calls \code{anchor(root, first, last)} on the contract.
+\item \emph{Inspection.} The student logs in to the dashboard, sees the release, runs the verification checks and downloads a receipt bundle that can be verified later against the chain alone.
+\end{enumerate}
+If any check in step~4 fails, TrustTrail refuses the release. If the refusal breaks one of the three rules, TrustTrail writes a violation entry and the trust engine may lower the service's tier, which removes profile scopes from its Keycloak client.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\scriptsize, >=Stealth]
+\def\H{-12.3}
+\foreach \x/\n/\t in {0/st/Student, 2.6/sv/Service, 5.4/kc/Keycloak, 8.4/tt/TrustTrail, 11.2/ch/Chain}{
+  \node[draw, rounded corners=1pt, minimum width=18mm, minimum height=6mm, font=\small] (\n) at (\x,0) {\t};
+  \draw[densely dotted] (\x,-0.35) -- (\x,\H);
+}
+\newcommand{\ttmsg}[4]{\draw[->] (#1,#3) -- node[above, align=center, font=\scriptsize, fill=white, inner sep=1pt] {#4} (#2,#3);}
+\newcommand{\ttret}[4]{\draw[->, dashed] (#1,#3) -- node[above, align=center, font=\scriptsize, fill=white, inner sep=1pt] {#4} (#2,#3);}
+\newcommand{\ttnote}[3]{\node[draw, fill=white, align=left, font=\scriptsize, anchor=west] at (#1,#2) {#3};}
+\node[font=\scriptsize\itshape, anchor=west, fill=white, inner sep=1pt] at (-1.1,-0.75) {Setup (once per key / declaration)};
+\ttmsg{2.6}{5.4}{-1.2}{1. client\_credentials}
+\ttret{5.4}{2.6}{-1.7}{service token}
+\ttmsg{2.6}{8.4}{-2.2}{2. POST /services/keys (JWK)}
+\ttmsg{2.6}{8.4}{-2.8}{3. POST /declarations (signed JWS)}
+\ttret{8.4}{2.6}{-3.3}{declaration\_id}
+\node[font=\scriptsize\itshape, anchor=west, fill=white, inner sep=1pt] at (-1.1,-3.85) {Login and release};
+\ttmsg{0}{2.6}{-4.3}{4. open service}
+\ttmsg{2.6}{5.4}{-4.8}{5. authorize: openid profile-x}
+\ttmsg{0}{5.4}{-5.4}{6. authenticate (or SSO)}
+\ttret{5.4}{2.6}{-5.9}{7. code $\rightarrow$ tokens: pairwise sub, no sid, no claims}
+\ttmsg{2.6}{8.4}{-6.6}{8. POST /release (token, declaration\_id)}
+\ttmsg{8.4}{5.4}{-7.2}{9. JWKS, user attributes}
+\ttnote{8.6}{-7.9}{10. check token, declaration,\\\ \ \ \ \ deletion date, tier cap;\\\ \ \ \ \ ledger entry + receipt}
+\ttret{8.4}{2.6}{-8.8}{11. values + signed receipt}
+\node[font=\scriptsize\itshape, anchor=west, fill=white, inner sep=1pt] at (-1.1,-9.4) {Every 300 s};
+\ttmsg{8.4}{11.2}{-9.9}{12. anchor(root, first, last)}
+\node[font=\scriptsize\itshape, anchor=west, fill=white, inner sep=1pt] at (-1.1,-10.5) {Later};
+\ttmsg{0}{8.4}{-11.0}{13. dashboard: list, verify, download}
+\ttmsg{0}{11.2}{-11.8}{14. verify receipt: getBatch(id) (no TrustTrail needed)}
+\end{tikzpicture}
+\caption{Sequence of one release, from service setup to independent verification by the student.}
+\label{fig:sequence}
+\end{figure}
+
+\subsection{Deployment}
+Table~\ref{tab:containers} lists the containers. Keycloak's health check gates the start of TrustTrail and the services, and TrustTrail starts only after the contract has been deployed. TrustTrail's and the services' source code is mounted into their containers, so the tests and scripts run against the code in the repository.
+
+\begin{table}[t]
+\centering
+\caption{Containers in the Docker Compose deployment}
+\label{tab:containers}
+\small
+\begin{tabularx}{\linewidth}{@{}l l X l@{}}
+\toprule
+Container & Image / build & Role & Port \\
+\midrule
+\code{keycloak} & Keycloak 26.8.1 + mapper JAR & IdP, realm \code{trusttrail} & 8080 \\
+\code{chain} & Node 22, Hardhat 3 & In-memory Ethereum chain & 8545 \\
+\code{chain-deploy} & same as \code{chain} & Deploys \code{TrustTrailAnchor}, writes deployment file, exits & -- \\
+\code{trusttrail} & Python 3.12, FastAPI & Release API, ledger, trust, anchoring, dashboard & 8000 \\
+\code{library}, \code{lms}, \code{exam} & Python 3.12, FastAPI & Honest demo services & 8001--8003 \\
+\bottomrule
+\end{tabularx}
+\end{table}

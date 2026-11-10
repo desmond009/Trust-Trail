@@ -1,0 +1,68 @@
+\section{Background}
+\label{sec:background}
+
+This section introduces the protocols, cryptographic building blocks and privacy principles that the rest of the paper relies on. Readers familiar with OIDC and Merkle trees can skip to Section~\ref{sec:basepaper}.
+
+\subsection{Identity management, federation and single sign-on}
+Identity management (IdM) covers how identities are created, authenticated, described by attributes and eventually removed. In a federation, several organisations agree to trust each other's identity assertions. One party, the identity provider (IdP), authenticates the user and issues an assertion; the service provider (SP), or relying party (RP) in OIDC terms, accepts the assertion and makes its own authorisation decision~\cite{werner2017survey,birrell2013federated}. Single sign-on (SSO) follows: once the user has a session at the IdP, further services can be reached without logging in again.
+
+Federations differ in how much the members trust each other. Ferdous and Poet distinguish \emph{fully trusted}, \emph{semi-trusted} and \emph{untrusted} entities in dynamic SAML federations, depending on whether a legal agreement backs the relationship~\cite{ferdous2015dynamic}. TrustTrail reuses these three names for its service tiers and adds a fourth, \emph{blocked}, for services that have lost trust through violations.
+
+From a privacy point of view, the IdP is in a powerful position. It knows every user's attributes and sees every login to every service. Birrell and Schneider characterise federated IdM systems by three properties that users may want~\cite{birrell2013federated}: \emph{undetectability} (others cannot tell that a transaction happened), \emph{unlinkability} (transactions cannot be connected to each other or to the user) and \emph{confidentiality} (the user controls who learns their attributes). Pfitzmann and Hansen give the standard terminology for anonymity, unlinkability and pseudonymity~\cite{pfitzmann2010terminology}. A \emph{pseudonym} is an identifier other than the user's real name; it is \emph{relationship-specific} when the user has a different pseudonym for each communication partner, which prevents partners from linking the user by identifier.
+
+\subsection{OAuth 2.0 and OpenID Connect}
+OAuth~2.0~\cite{rfc6749} lets a client obtain an \emph{access token} from an authorisation server in order to call a protected API. The client asks for \emph{scopes}, which name the permissions it wants, and the server decides which scopes to grant. Two OAuth flows matter here. In the \emph{authorization code} flow, the user's browser is redirected to the server, the user authenticates, and the client exchanges a one-time code for tokens over a back channel. In the \emph{client credentials} flow, a client authenticates as itself, with no user involved; TrustTrail uses it to authenticate services that register their keys.
+
+OpenID Connect~\cite{oidccore} adds authentication on top of OAuth. The server, now an OpenID Provider, issues an \emph{ID token}: a signed JSON Web Token (JWT)~\cite{rfc7519} whose claims state who the user is (\code{sub}), who issued the token (\code{iss}), for which client it is meant (\code{aud}) and when it was issued and expires. Additional user attributes, such as name or e-mail address, can be placed in the ID token, the access token, or returned from a userinfo endpoint, depending on the requested scopes and the provider's configuration. Keycloak~\cite{keycloakdocs} controls this per client through \emph{client scopes} and \emph{protocol mappers}. A client scope bundles claims; it can be assigned to a client as a \emph{default} scope (always granted) or an \emph{optional} scope (granted only when requested). A protocol mapper is a plug-in that adds, changes or removes claims in the tokens that a client receives.
+
+\subsubsection{Pairwise subject identifiers}
+OIDC defines two subject identifier types~\cite[Sec.~8]{oidccore}. With the \emph{public} type, every client receives the same \code{sub} for a user. With the \emph{pairwise} type, each client, or more exactly each \emph{sector} of clients, receives a different \code{sub}, so clients cannot correlate the user by identifier. The specification suggests computing the pairwise value as a hash of the sector identifier, the local account identifier and a secret salt. Keycloak's SHA-256 pairwise mapper does this and then formats the 32-byte digest as a name-based (version~3) UUID; the sector is the host name of the client's redirect URIs unless a sector identifier URI is configured. Pairwise identifiers are also recommended by NIST's federation guidelines~\cite{nist80063c}.
+
+\subsubsection{Session identifiers}
+Keycloak adds a session identifier claim, \code{sid}, to the tokens it issues. All clients that a user reaches within one SSO session receive the same \code{sid} value. The authorisation response can also carry a \code{session\_state} parameter derived from the session. As Section~\ref{sec:design} shows, these values defeat pairwise identifiers: two services that compare \code{sid} values can link the two pseudonyms of the same student.
+
+\subsection{JSON Web Signatures and keys}
+A JSON Web Signature (JWS)~\cite{rfc7515} protects a payload with a digital signature or MAC. Its \emph{compact serialisation} is three base64url strings separated by dots: a protected header, the payload and the signature. The header names the algorithm (\code{alg}), may name the signing key (\code{kid}) and may state a media type (\code{typ}) so that a JWS meant for one purpose is not accepted for another. TrustTrail uses two algorithms from the JSON Web Algorithms specification~\cite{rfc7518}: ES256 (ECDSA on curve P-256 with SHA-256) and RS256 (RSASSA-PKCS1-v1\_5 with SHA-256). Public keys are exchanged as JSON Web Keys (JWK)~\cite{rfc7517}. The JWK thumbprint~\cite{rfc7638} is the SHA-256 hash of a canonical JSON object made of the key's required members in lexicographic order; it gives a key a stable identifier that is derived from the key itself, which TrustTrail uses as the \code{kid}.
+
+A signed JWS gives \emph{non-repudiation} in a practical sense: if the verifier keeps the JWS, it can later show a third party that the holder of the private key signed exactly this payload. TrustTrail relies on this property for purpose declarations, which services sign, and for release receipts, which TrustTrail signs.
+
+\subsection{Hash chains and tamper-evident logs}
+A cryptographic hash function such as SHA-256 maps any input to a fixed-size digest; it is infeasible to find two inputs with the same digest or to change an input without changing its digest. A \emph{hash chain} links records by including the digest of the previous record in each new record. Haber and Stornetta used this idea to timestamp digital documents~\cite{haber1991timestamp}, and Schneier and Kelsey applied it to audit logs, so that an attacker who takes over a logging machine cannot undetectably change entries written before the takeover~\cite{schneier1999secure}. A chain alone has a known weakness: whoever controls the whole log can rewrite an entry and recompute every later hash, or cut off the newest entries. Detecting that requires some value that the attacker cannot change, such as a hash that has been published elsewhere or handed to a third party~\cite{crosby2009efficient,ma2007forward}.
+
+\subsection{Merkle trees}
+A Merkle tree~\cite{merkle1987signature} hashes a list of items in pairs, then hashes the results in pairs, until one \emph{root} hash remains. The root commits to every item and its position. To prove that an item is in the tree, it is enough to give the hashes of its siblings on the path to the root, which takes $\lceil \log_2 n \rceil$ hashes for $n$ items; the verifier recomputes the root and compares. Certificate Transparency (CT) uses Merkle trees for public, append-only logs of TLS certificates~\cite{laurie2014certificate}. Its specification, RFC~6962~\cite{rfc6962} (updated by RFC~9162~\cite{rfc9162}), prefixes leaf inputs with the byte \code{0x00} and interior-node inputs with \code{0x01}. This domain separation stops an attacker from presenting an interior node as a leaf. TrustTrail follows these conventions.
+
+\subsection{Blockchains, smart contracts and anchoring}
+A blockchain is a replicated ledger in which blocks of transactions are linked by hashes and agreed on by many independent nodes, so that a confirmed transaction is very hard to remove or change~\cite{nakamoto2008bitcoin}. Ethereum~\cite{wood2014ethereum} adds \emph{smart contracts}: programs stored on the chain whose functions are called by transactions. A contract can keep state, emit \emph{events} that clients can search, and reject calls that break its rules. Every operation costs \emph{gas}, paid for in the chain's currency; writing to contract storage is among the most expensive operations. Contracts are usually written in Solidity~\cite{soliditydocs} and tested on a local development chain such as Hardhat~\cite{hardhatdocs} before deployment to a public test network such as Sepolia or to the main network.
+
+\emph{Anchoring} uses a blockchain as the external, hard-to-change place where a log's hash is published. Instead of writing each record, a system periodically writes one Merkle root that covers many records. OpenTimestamps~\cite{todd2016opentimestamps} and Chainpoint~\cite{chainpoint} anchor document hashes this way. Anchoring keeps the data off chain, which matters for personal data that must not become public and permanent, and keeps the cost per record low.
+
+\subsection{Privacy principles in law and design}
+The GDPR~\cite{gdpr2016} lists principles for processing personal data in Article~5. Four of them shape TrustTrail's goals: \emph{purpose limitation} (data is collected for specified, explicit purposes), \emph{data minimisation} (adequate, relevant and limited to what is necessary), \emph{storage limitation} (kept no longer than necessary) and \emph{accountability} (the controller is responsible for, and able to demonstrate, compliance). India's Digital Personal Data Protection Act, 2023~\cite{dpdp2023} applies to student data held by Indian institutes; it likewise links processing to a specified purpose and requires erasure when the purpose is no longer served. Cavoukian's \emph{Privacy by Design} principles~\cite{cavoukian2011pbd} ask that privacy be the default setting, embedded into the design, and visible and transparent to the user. The Kantara Initiative's Consent Receipt specification~\cite{kantarareceipt} proposes giving users a record of each consent they grant, an idea close to TrustTrail's release receipts.
+
+Table~\ref{tab:terms} summarises the terms used in the rest of the paper.
+
+\begin{table}[t]
+\centering
+\caption{Terms used in this paper}
+\label{tab:terms}
+\small
+\begin{tabularx}{\linewidth}{@{}l X@{}}
+\toprule
+Term & Meaning in TrustTrail \\
+\midrule
+IdP & Keycloak, the campus OpenID Provider. Authenticates students and issues tokens. \\
+Service & A relying party, such as the library, the LMS or the exam portal. \\
+Profile & One of four disclosure levels: \emph{anonymous}, \emph{pseudonym}, \emph{partial}, \emph{total}. Each maps to a fixed attribute set. \\
+Tier & A service's trust level: \emph{fully\_trusted}, \emph{semi\_trusted}, \emph{untrusted} or \emph{blocked}. Each tier has a profile cap. \\
+Base tier & The tier in the service's agreement with the institute; its cap is the most the service may ever ask for. \\
+Pairwise \code{sub} & The per-service pseudonym of a student. \\
+Purpose declaration & A JWS signed by a service: attributes, purpose, deletion date (\code{retention\_until}). \\
+Release & One delivery of attribute values from TrustTrail to a service. \\
+Receipt & A JWS signed by TrustTrail that describes one release. \\
+Ledger & The append-only, hash-chained table of releases, violations and trust resets. \\
+Violation & A refused request that breaks one of three rules; recorded in the ledger and counted against trust. \\
+Anchor & A Merkle root of a contiguous batch of ledger entries, stored in the \code{TrustTrailAnchor} contract. \\
+\bottomrule
+\end{tabularx}
+\end{table}

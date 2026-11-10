@@ -1,0 +1,75 @@
+\documentclass[journal,onecolumn,11pt]{IEEEtran}
+
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \setmainfont{texgyretermes}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+  \setmonofont{texgyrecursor}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold, ItalicFont=*-italic, BoldItalicFont=*-bolditalic, Scale=0.95]
+\else
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \usepackage{newtxtext}
+\fi
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{cite}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framerule=0.3pt,
+  showstringspaces=false,
+  captionpos=b
+}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\begin{document}
+
+\title{TrustTrail: Accountable, Purpose-Bound Attribute Release\\for Privacy-Aware Federated Identity Management}
+
+\author{Vijender~Yadav~(23BCS132),
+        Ansh~Hardaha~(23BCS016),
+        and~Sourabh~(23BEC055)%
+\thanks{The authors are B.Tech.\ students (7th semester) at the Indian Institute of Information Technology Dharwad, Karnataka, India.}}
+
+\markboth{B.Tech.\ Project Report, IIIT Dharwad, 2026}{Yadav \MakeLowercase{\textit{et al.}}: TrustTrail}
+
+\maketitle
+
+\input{sections/00-abstract}
+\input{sections/01-introduction}
+\input{sections/02-background}
+\input{sections/03-base-paper}
+\input{sections/04-related-work}
+\input{sections/05-threat-model}
+\input{sections/06-architecture}
+% \input{sections/07-design}
+% \input{sections/08-implementation}
+% \input{sections/09-evaluation}
+% \input{sections/10-discussion}
+% \input{sections/11-future-work}
+% \input{sections/12-conclusion}
+% \input{sections/13-backmatter}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+% \appendices
+% \input{sections/appendix}
+
+\end{document}

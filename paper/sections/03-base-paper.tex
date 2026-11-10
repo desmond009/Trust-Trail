@@ -1,0 +1,97 @@
+\section{The Base Paper and Its Gaps}
+\label{sec:basepaper}
+
+TrustTrail is a follow-up to the survey by Werner, Westphall and Westphall~\cite{werner2017survey}, published in \emph{Computer Networks} in 2017. This section summarises what the survey contributes, reads its tables quantitatively, and derives the gaps that TrustTrail addresses. All counts below come from the survey's own tables; we did not re-score the surveyed works.
+
+\subsection{What the survey does}
+The survey starts from the observation that, even with IdM systems, ``leakage of user data, the distribution of unnecessary attributes, and a lack of control on the dissemination of personal data are recurrent in cloud environments''~\cite{werner2017survey}. It asks three research questions: which IdM model is needed to ensure privacy in cloud computing, which techniques best address the lack of privacy control in interactions, and how federation partners should agree on privacy for authentication and authorisation. To answer them, the authors ran a systematic mapping. A keyword search found 198 papers, which were filtered by title and abstract and then by content.
+
+The central contribution is a taxonomy of privacy characteristics for IdM in the cloud, shown as a mind map in the survey's Fig.~3. It has nine characteristics, each refined into two mechanisms:
+\begin{itemize}
+\item \emph{Transparency} (advertence, consciousness): the user is told how attributes are collected, used and disclosed.
+\item \emph{Controllability} (selection, consent): the user chooses what is released and agrees to it.
+\item \emph{Minimization} (control, participation): only the information needed to access a resource is released.
+\item \emph{Accountability} (traceability, policies): auditing and tracking actions, ``in accordance with legal requirements'', so that misuse and privacy breaches can be identified and audited.
+\item \emph{Data quality} (validation, confidence): attributes are correct and validated.
+\item \emph{Use limitation} (obligations, policies): only authorised entities use the data, for the stated reason; a policy can state ``the reason or intention for using the data'' and an obligation is a directive to be carried out before or after access.
+\item \emph{User-friendliness} (with or without add-ons): an interface lets users ``check what data was released under what conditions, and to whom''.
+\item \emph{Trust} (reputation, risk): confidence in providers is assessed with metrics.
+\item \emph{Obfuscation} (anonymity, pseudonym): users are not identified, or are identified only by pseudonyms.
+\end{itemize}
+The survey relates these characteristics to the three properties of Birrell and Schneider (confidentiality, undetectability, unlinkability) in a Venn diagram (its Fig.~4).
+
+The survey then classifies six European research projects (PRIME, PrimeLife, ABC4Trust, GÉANT, PRISMACLOUD and CREDENTIAL; its Table~1) and 23 published proposals from 2009 to 2016 (its Table~2) by the characteristics they address. It describes five challenges for future research (its Section~4) and four works in progress by the authors' group (its Section~5 and Table~3). One of these works defines four standard \emph{interaction profiles}, anonymous, pseudonym, partial attributes and total attributes, as OIDC scopes~\cite{werner2015approach}; another adds a dissemination screen that warns the user about the provider's reputation~\cite{werner2016model}.
+
+\subsection{Reading the tables}
+Table~\ref{tab:coverage} counts how many of the surveyed proposals and projects address each characteristic. Two characteristics stand out. Accountability is marked for only 2 of the 23 proposals (Suriadi et al.~\cite{suriadi2009usercentric} and Sánchez et al.~\cite{sanchez2012enhancing}) and for 3 of the 6 projects. Use limitation is marked for 5 proposals and 2 projects. Data quality and user-friendliness are also rare, but they are less central to the problems described in Section~\ref{sec:intro}. In the authors' own works in progress, accountability and use limitation are not marked for any of the four.
+
+\begin{table}[t]
+\centering
+\caption{Coverage of the nine privacy characteristics in the survey by Werner et al.~\cite{werner2017survey}, counted from its Tables~1--3}
+\label{tab:coverage}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Characteristic & Proposals (of 23, Table 2) & EU projects (of 6, Table 1) & Authors' works (of 4, Table 3) \\
+\midrule
+Transparency     & 14 & 6 & 4 \\
+Controllability  & 17 & 6 & 3 \\
+Minimization     &  8 & 3 & 1 \\
+Accountability   & \textbf{2} & 3 & \textbf{0} \\
+Data quality     &  2 & 6 & 1 \\
+Use limitation   & \textbf{5} & 2 & \textbf{0} \\
+User-friendly    &  2 & 3 & 3 (all ``partial'') \\
+Trust            &  5 & 2 & 2 \\
+Obfuscation      &  6 & 3 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The numbers suggest a pattern. Most work concentrates on the moment of disclosure: telling the user what will be released (transparency), letting the user choose (controllability) and releasing less (minimization). Far less work addresses what happens around and after the disclosure: whether the release can be traced and audited later (accountability), and whether the service's use is bound to a stated reason and time (use limitation). For students, these are exactly the missing pieces. A student who never sees a record of releases cannot exercise any control after the fact, and a promise of deletion that nobody records cannot be checked.
+
+\subsection{The survey's open challenges}
+The survey's Section~4 lists five challenges and directions for privacy-based IdM in the cloud. We summarise each and note what is still open.
+
+\emph{Reliability assessment} (Section~4.1 of the survey). Federation partners need a way to evaluate trust in each other, for example through provider reputation or risk metrics. The surveyed works that address trust mostly use reputation values or static trust levels, such as the fully trusted, semi-trusted and untrusted classes of Ferdous and Poet~\cite{ferdous2015dynamic}. What is missing is a link from observed behaviour to the trust level: a provider that misbehaves keeps its level until someone changes it.
+
+\emph{Agreement of privacy options} (Section~4.2). The IdP and the service should agree in advance on the privacy features of their interaction, and the agreement should not be static. In the surveyed works, such agreements are policies or contracts outside the protocol. They are not bound to individual releases, and the service does not sign anything that could later be held against it.
+
+\emph{Definition of interaction profiles} (Section~4.3). Predefined profiles help users and services disclose the least information needed. The authors' own work defines the four profiles as OIDC scopes~\cite{werner2015approach}. A profile scope says what the service \emph{asks} for. On its own it does not stop a service from asking for a more revealing profile, and it does nothing about linkage across services through identifiers or session values.
+
+\emph{Granular control over the dissemination of data} (Section~4.4). Releasing individual attributes, not whole profiles, should be possible depending on context. This is largely solved by attribute filtering and consent screens in existing systems such as the Shibboleth extension of Orawiwattanakul et al.~\cite{orawiwattanakul2010user}.
+
+\emph{Ensuring the implementation of policies} (Section~4.5). The survey states that ``it is essential that the application of different privacy policies be guaranteed in an automated way'' and calls compliance assessment ``a key challenge''~\cite{werner2017survey}. Sticky policies~\cite{pearson2011sticky,chadwick2012privacy} attach usage conditions to data, but the survey notes about one sticky-policy approach that it ``does not make clear the means to ensure the effective implementation of sticky policies after receiving data''.
+
+\subsection{Weaknesses of the surveyed approaches}
+Taken together with the coverage counts, the survey's own remarks point to four weaknesses in the state of the art it describes.
+
+\begin{enumerate}
+\item \emph{No evidence trail.} Accountability is the least covered characteristic. Even where it is marked, the works audit the system or trace data inside a trusted environment; none gives the user, or an outside auditor, evidence of releases that the operator cannot later alter.
+\item \emph{Purposes without enforcement.} Use limitation appears as policies and obligations, but not as a promise that is checked on every release. A service's purpose and retention period are not recorded with the data that was released under them.
+\item \emph{Static trust.} Trust levels and reputation scores are inputs set by administrators or by user feedback; a provider that breaks its promises does not automatically get less data.
+\item \emph{Proposals without implementations.} The survey itself observes of several works that they do ``not provide details and [do] not validate the proposal'', offer ``mathematical and logical evidences, without a practical implementation'', or do ``not make clear how to implement'' a component~\cite{werner2017survey}. Several of the works are also built on SAML federations, whereas current campus deployments increasingly use OIDC.
+\end{enumerate}
+
+\subsection{From gaps to requirements}
+Table~\ref{tab:gaps} maps each challenge and weakness to a requirement for TrustTrail and to the mechanism that meets it. The mechanisms are described in Sections~\ref{sec:architecture} and~\ref{sec:design}, and Section~\ref{sec:eval-taxonomy} compares TrustTrail with the authors' works on the same nine characteristics.
+
+\begin{table}[t]
+\centering
+\caption{From the survey's challenges to TrustTrail's requirements and mechanisms}
+\label{tab:gaps}
+\small
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{3.2cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+Challenge or weakness & Requirement for TrustTrail & Mechanism \\
+\midrule
+Reliability assessment (4.1); static trust & Trust must follow observed behaviour and change what a service receives. & Trust score lowered by violations; tier cap enforced at Keycloak and at release (Sec.~\ref{sec:design-trust}). \\
+Agreement of privacy options (4.2); purposes without enforcement & The service must commit to attributes, purpose and deletion date before any release, in a form it cannot later deny. & Signed purpose declarations; releases refused outside them; signed receipts (Sec.~\ref{sec:design-declarations}). \\
+Interaction profiles (4.3) & The IdP and the release service must both enforce the profile, and services must not be able to link students. & Keycloak scope assignment as tier cap; pairwise \code{sub}; \code{sid} removed by a custom mapper (Sec.~\ref{sec:design-profiles}). \\
+Granular control (4.4) & A service may ask for a subset of its profile. & Per-request attribute list checked against declaration and profile (Sec.~\ref{sec:design-declarations}). \\
+Ensuring policy implementation (4.5); no evidence trail & Every release and every rule break must be recorded so that later changes are detectable, even by the operator. & Hash-chained ledger, receipts, Merkle anchoring on Ethereum (Secs.~\ref{sec:design-ledger}, \ref{sec:design-anchoring}). \\
+Proposals without implementations & The design must run on a current IdP and be measured. & Keycloak 26 implementation, 155 tests, evaluation (Secs.~\ref{sec:implementation}, \ref{sec:evaluation}). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+One requirement from the survey we deliberately do not take on. The survey lists data quality, the validation of attribute values, as a characteristic. In a campus federation the IdP is the institute's own system of record, so we treat its attribute values as correct and do not add validation.

@@ -1,0 +1,175 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "address": "0x3415e1C6B20E184EA493007A56589Cebf2074BC8",
+  "owner": "0x3872e690A3f511161BC2d9A3213bf14D31071EF6",
+  "deployBlock": 12104082,
+  "deployTx": "0x311098914e8657aecef540b48f2d7205cf635ca83cfc6861da5f2cf6930d857e",
+  "deployGas": 2411192,
+  "deployedAt": "2026-11-10T10:37:38.002Z",
+  "abi": [
+    {
+      "type": "constructor",
+      "stateMutability": "undefined",
+      "payable": false,
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "EmptyRange",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "NotContiguous",
+      "inputs": [
+        {
+          "type": "uint64",
+          "name": "expectedFirstEntryId"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "NotOwner",
+      "inputs": []
+    },
+    {
+      "type": "event",
+      "anonymous": false,
+      "name": "Anchored",
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "batchId",
+          "indexed": true
+        },
+        {
+          "type": "bytes32",
+          "name": "root",
+          "indexed": false
+        },
+        {
+          "type": "uint64",
+          "name": "firstEntryId",
+          "indexed": false
+        },
+        {
+          "type": "uint64",
+          "name": "lastEntryId",
+          "indexed": false
+        },
+        {
+          "type": "uint64",
+          "name": "anchoredAt",
+          "indexed": false
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "anchor",
+      "constant": false,
+      "payable": false,
+      "inputs": [
+        {
+          "type": "bytes32",
+          "name": "root"
+        },
+        {
+          "type": "uint64",
+          "name": "firstEntryId"
+        },
+        {
+          "type": "uint64",
+          "name": "lastEntryId"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": "batchId"
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "batchCount",
+      "constant": true,
+      "stateMutability": "view",
+      "payable": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint256",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "getBatch",
+      "constant": true,
+      "stateMutability": "view",
+      "payable": false,
+      "inputs": [
+        {
+          "type": "uint256",
+          "name": "batchId"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "tuple",
+          "name": "",
+          "components": [
+            {
+              "type": "bytes32",
+              "name": "root"
+            },
+            {
+              "type": "uint64",
+              "name": "firstEntryId"
+            },
+            {
+              "type": "uint64",
+              "name": "lastEntryId"
+            },
+            {
+              "type": "uint64",
+              "name": "anchoredAt"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "lastAnchoredEntryId",
+      "constant": true,
+      "stateMutability": "view",
+      "payable": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "uint64",
+          "name": ""
+        }
+      ]
+    },
+    {
+      "type": "function",
+      "name": "owner",
+      "constant": true,
+      "stateMutability": "view",
+      "payable": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "address",
+          "name": ""
+        }
+      ]
+    }
+  ]
+}

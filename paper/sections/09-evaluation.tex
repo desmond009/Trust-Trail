@@ -1,36 +1,38 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-The evaluation answers the research questions of Section~\ref{sec:intro} with five experiments: a functional check of what services receive (RQ1), the cost of the privacy layer in login latency (RQ5), the detection of tampering with the ledger (RQ3), the detection of misbehaving services and the resulting change in what they receive (RQ2, RQ4), and the cost of anchoring (RQ5). It ends with a comparison against the base survey's taxonomy.
+The evaluation answers the research questions of Section~\ref{sec:intro} with five experiments: a functional check of what services receive (RQ1), the cost of the privacy layer in login latency (RQ5), conformance tests for tampering with the ledger (RQ3) and for misbehaving services (RQ2, RQ4), and the cost and delay of anchoring on a local chain and on a public test network (RQ3, RQ5). It ends with a comparison against the base survey's taxonomy.
+
+The tamper and violation experiments need a word of caution before the results. We wrote the attacks, the scripted services and the expected outcomes ourselves. These experiments are therefore \emph{conformance tests}: they show that each mechanism behaves as designed against the attacks and misbehaviours we specified. They are not estimates of how often a real attacker or a real service would be caught.
 
 \subsection{Setup}
-All experiments ran on one Apple-silicon laptop under macOS, with every component in Docker containers as in Table~\ref{tab:containers}: Keycloak~26.8.1 in development mode, TrustTrail, the three honest services and a local Hardhat chain. All data was invented: five students and six services. To exercise many logins quickly, the scripts obtain tokens with the OAuth password grant, which we enabled on the test clients for this purpose only; a browser login adds the same redirects to both variants we compare. The latency, tamper and violation experiments are scripted in TrustTrail's evaluation harness and were run on 10 November 2026 with \code{eval/run\_all.sh}; the anchoring measurement was run the same day. Raw data is stored with the results.
+All experiments ran on one Apple-silicon laptop under macOS, with every component in Docker containers as in Table~\ref{tab:containers}: Keycloak~26.8.1 in development mode, TrustTrail, the three honest services and a local Hardhat chain. All data was invented: five students and six services. To exercise many logins quickly, the scripts obtain tokens with the OAuth password grant, which we enabled on the test clients for this purpose only. The latency and violation experiments were run on 10 November 2026 after the audience check of Section~\ref{sec:design-declarations} was added. For the public-chain experiments, the same day, we deployed the anchor contract on the Sepolia test network through an Alchemy RPC endpoint and switched TrustTrail's anchoring to it; the tamper experiment was run against both chains. Raw data is stored with the results.
 
 \subsection{What services receive}
 \label{sec:eval-functional}
-The Phase~1 demonstration script computes, for each of the five students, the \code{sub} that each of the three services receives, and asks TrustTrail for a release on behalf of each service. In every row, the three identifiers differed. For example, student \emph{asha} is \code{f266e8cf-\ldots} at the library, \code{4336de76-\ldots} at the LMS and \code{158b3330-\ldots} at the examination portal. The Keycloak tokens received by all three services contained no personal claims. TrustTrail released \code{\{affiliation, sub\}} to the library, added department, programme and year for the LMS, and added name, e-mail address and roll number for the examination portal, exactly the profiles of Table~\ref{tab:profiles}. The script also reads each service client's assigned scopes from Keycloak: the library can obtain only \emph{anonymous} and \emph{pseudonym}, the LMS also \emph{partial}, and the examination portal all four. The browser-level check confirmed in a real authorisation code flow, with SSO between the library and the LMS, that the two services received different \code{sub} values and no \code{sid}, \code{session\_state} or \code{auth\_time}. These results come from scripted checks and the integration tests; they show that the configuration does what the design intends. They do not prove unlinkability against timing analysis, which is a non-goal.
+The Phase~1 demonstration script computes, for each of the five students, the \code{sub} that each of the three services receives, and asks TrustTrail for a release on behalf of each service. In every row, the three identifiers differed. For example, student \emph{asha} is \code{f266e8cf-\ldots} at the library, \code{4336de76-\ldots} at the LMS and \code{158b3330-\ldots} at the examination portal. The Keycloak tokens received by all three services contained no personal claims. TrustTrail released \code{\{affiliation, sub\}} to the library, added department, programme and year for the LMS, and added name, e-mail address and roll number for the examination portal, exactly the profiles of Table~\ref{tab:profiles}. The script also reads each service client's assigned scopes from Keycloak: the library can obtain only \emph{anonymous} and \emph{pseudonym}, the LMS also \emph{partial}, and the examination portal all four. The browser-level check confirmed in a real authorisation code flow, with SSO between the library and the LMS, that the two services received different \code{sub} values and no \code{sid}, \code{session\_state} or \code{auth\_time}. This is a functional check with five students, not a measurement of unlinkability. It shows the absence of linking identifiers. It does not address linking through the released attribute values or through timing, both of which are non-goals (Section~\ref{sec:threat}).
 
 \subsection{Latency overhead}
 \label{sec:eval-latency}
-\emph{Method.} We compare two ways of logging a student in to a service. The \emph{baseline} is a plain Keycloak client that receives all attributes in its ID token, the usual configuration that TrustTrail replaces; one token request completes the login. The \emph{TrustTrail} variant obtains the LMS's token (pairwise \code{sub}, no session identifier, no claims) and then calls \code{/release}, which verifies the token, applies the trust cap, checks the declaration, maps the pseudonym, fetches the attributes from Keycloak, appends a ledger entry and signs a receipt. After 10 warm-up runs of each, the harness ran 200 runs of each variant in a random interleaved order, cycling through the five students, and timed each with \code{time.perf\_counter}. Anchoring runs in the background and is not on the login path.
+\emph{Method.} We compare two ways of logging a student in to a service. The \emph{baseline} is a plain Keycloak client that receives all attributes in its ID token, the usual configuration that TrustTrail replaces; one token request completes the login. The \emph{TrustTrail} variant obtains the LMS's token (pairwise \code{sub}, no session identifier, no claims, audience \code{trusttrail}) and then calls \code{/release}, which verifies the token, applies the trust cap, checks the declaration, maps the pseudonym, fetches the attributes from Keycloak, appends a ledger entry and signs a receipt. After 10 warm-up runs of each, the harness ran 200 runs of each variant in a random interleaved order, cycling through the five students, and timed each with \code{time.perf\_counter}. Percentiles use the nearest-rank definition. The confidence interval of the difference in medians is a percentile bootstrap with 10{,}000 resamples. Anchoring runs in the background and is not on the login path.
 
-\emph{Results.} Table~\ref{tab:latency} and Fig.~\ref{fig:latency} show the results. The median TrustTrail login took 19.6\,ms against 16.0\,ms for the baseline, an overhead of 3.6\,ms or 22\%. At the 95th percentile the overhead was 5.5\,ms. The \code{/release} call itself had a median of 3.6\,ms. Two earlier runs of the same benchmark gave median overheads of 4.0\,ms and 3.4\,ms, so the result is stable to within about half a millisecond.
+\emph{Results.} Table~\ref{tab:latency} and Fig.~\ref{fig:latency} show the results. The median TrustTrail login took 18.6\,ms against 15.5\,ms for the baseline, a difference of 3.2\,ms (95\% CI 3.0 to 3.4\,ms). The difference between the two 95th percentiles was 3.4\,ms. The \code{/release} call itself had a median of 3.5\,ms. Both variants had a standard deviation of about 2.5\,ms. A run of the same benchmark before the audience check was added gave a median difference of 3.6\,ms, which is within the variation we see between runs on this machine.
 
 \begin{table}[t]
 \centering
-\caption{Login latency, 200 runs per variant (10 November 2026)}
+\caption{Login latency, 200 runs per variant (10 November 2026). Percentiles are nearest-rank.}
 \label{tab:latency}
 \small
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 Variant & Median (ms) & p95 (ms) & Mean (ms) & Min (ms) & Max (ms) \\
 \midrule
-Plain OIDC login (no privacy layer) & 16.0 & 20.2 & 16.7 & 15.1 & 49.4 \\
-TrustTrail login + release (total) & 19.6 & 25.6 & 20.1 & 17.9 & 31.0 \\
-\quad of which: Keycloak token & 15.9 & 20.8 & 16.4 & 14.9 & 24.6 \\
-\quad of which: TrustTrail \code{/release} & 3.6 & 5.1 & 3.8 & 2.8 & 6.4 \\
+Plain OIDC login (no privacy layer) & 15.5 & 20.6 & 16.4 & 14.7 & 31.2 \\
+TrustTrail login + release (total) & 18.6 & 24.0 & 19.5 & 17.4 & 41.2 \\
+\quad of which: Keycloak token & 15.3 & 18.8 & 15.9 & 14.5 & 37.5 \\
+\quad of which: TrustTrail \code{/release} & 3.5 & 4.9 & 3.6 & 2.7 & 6.4 \\
 \midrule
-Overhead (TrustTrail $-$ plain) & +3.6 & +5.5 & & & \\
+Difference (TrustTrail $-$ plain) & +3.2 & +3.4 & & & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -38,15 +40,15 @@ Overhead (TrustTrail $-$ plain) & +3.6 & +5.5 & & & \\
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/latency_ecdf.pdf}
-\caption{Cumulative distribution of login latency. The TrustTrail curve is shifted right by the \code{/release} call, a few milliseconds. One baseline run at 49.4\,ms lies beyond the plotted range.}
+\caption{Cumulative distribution of login latency. The TrustTrail curve is shifted right by the \code{/release} call, about 3\,ms. One TrustTrail run at 41.2\,ms lies beyond the plotted range.}
 \label{fig:latency}
 \end{figure}
 
-\emph{Interpretation.} The privacy layer costs a few milliseconds per login, which a user will not notice next to network and page-load times. The release call covers token verification, the declaration and cap checks, a request to Keycloak for the student record, the ledger transaction and an ECDSA signature; we did not time these steps separately. Because everything ran on one machine without network latency, the absolute numbers are lower than a deployment would see; the overhead in a deployment would also include one extra network round trip from the service to TrustTrail. We did not measure behaviour under concurrent load; all database writes go through one lock, so throughput is an open question (Section~\ref{sec:discussion}).
+\emph{Interpretation.} The absolute cost, about 3\,ms per login, is the meaningful figure. The relative figure (about 21\%) is large only because the baseline is a 15\,ms token request over the loopback interface; a browser login with redirects and page loads, or any network between the parties, would make the same few milliseconds a much smaller fraction. We did not time the steps inside \code{/release} separately, and a deployment would add one network round trip from the service to TrustTrail. The benchmark uses one service, one client at a time and the password grant; it does not measure behaviour under concurrent load, and all database writes go through one lock (Section~\ref{sec:discussion}).
 
-\subsection{Tamper detection}
+\subsection{Tamper conformance}
 \label{sec:eval-tamper}
-\emph{Method.} The tamper experiment models adversary A5, an insider with write access to the database file. In each of five repetitions, the harness makes sure the ledger has at least six entries, anchors all of them, adds one more release after the anchor, and records the entry hashes contained in all stored receipts, which stand for the receipts that students have downloaded. It then picks a random target release (not the first and not the newest) and runs six attacks, each on a fresh copy of the live database with the append-only triggers dropped:
+\emph{Method.} The tamper experiment models adversary A5, an insider with write access to the database file. In each of five repetitions, the harness makes sure the ledger has at least six entries, anchors all of them, adds one more release after the anchor, and records the entry hashes contained in \emph{all} stored receipts, which stand for receipts that students have downloaded. It then picks a random target release (not the first and not the newest) and runs six attacks, each on a fresh copy of the live database with the append-only triggers dropped:
 \begin{enumerate}
 \item[A.] change an entry's released attributes and leave its stored hash;
 \item[B.] change an entry's purpose and recompute its hash;
@@ -55,18 +57,18 @@ Overhead (TrustTrail $-$ plain) & +3.6 & +5.5 & & & \\
 \item[E.] cut off the tail of the ledger, from the last anchored entry onward;
 \item[F.] change the release made after the last anchor and fix the hashes from there on.
 \end{enumerate}
-After each attack, three independent checks run: the hash chain verification, a check of every held receipt against the ledger (entry present and recomputed hash equal to the hash in the receipt), and verification of the ledger against the on-chain batches. The live ledger is never modified.
+After each attack, three independent checks run: the hash chain verification, a check of every held receipt against the ledger (entry present and recomputed hash equal to the hash in the receipt), and verification of the ledger against the on-chain batches. The live ledger is never modified. We ran the experiment once with the local chain and once with Sepolia.
 
-\emph{Results.} Table~\ref{tab:tamper} shows that every attack was detected by at least one check in all five repetitions, and every cell matched the outcome the design predicts. The hash chain alone missed attacks D, E and F, as Section~\ref{sec:design-ledger} explains. Receipts caught all six, because each attack changed or removed an entry for which a receipt exists. Anchoring caught all attacks on anchored entries, including D and E, which are invisible to the chain, but not attack F, which edits an entry made after the last anchor.
+\emph{Results.} Table~\ref{tab:tamper} shows the outcome, which was identical on both chains: in all five repetitions, each check detected exactly the attacks the design says it should. The hash chain alone missed D, E and F. Anchoring caught every attack on anchored entries, including D and E, but not F, which edits an entry made after the last anchor. With Sepolia, the anchor check compares against roots held on a public network that TrustTrail cannot rewrite, so D and E, which include a full rewrite of history from some entry onward, are detected even if the operator makes them.
 
 \begin{table}[t]
 \centering
-\caption{Tamper detection: repetitions in which each check detected the attack (of 5)}
+\caption{Tamper conformance: repetitions in which each check detected the attack (of 5). Identical results with the local chain and with Sepolia.}
 \label{tab:tamper}
 \small
 \begin{tabular}{@{}lcccc@{}}
 \toprule
-Attack & Hash chain & Student receipts & Blockchain anchor & Any check \\
+Attack & Hash chain & Student receipts$^{*}$ & Blockchain anchor & Any check \\
 \midrule
 A. change an entry, leave its hash & 5/5 & 5/5 & 5/5 & 5/5 \\
 B. change an entry, recompute its hash & 5/5 & 5/5 & 5/5 & 5/5 \\
@@ -75,25 +77,26 @@ D. change an entry, recompute every later hash & 0/5 & 5/5 & 5/5 & 5/5 \\
 E. cut off the tail of the ledger & 0/5 & 5/5 & 5/5 & 5/5 \\
 F. change an entry made after the last anchor & 0/5 & 5/5 & 0/5 & 5/5 \\
 \bottomrule
+\multicolumn{5}{@{}l}{\footnotesize $^{*}$Assumes the student whose entry was attacked holds its receipt; see text.}
 \end{tabular}
 \end{table}
 
-\emph{Interpretation.} The three mechanisms cover each other's gaps. The chain catches careless edits cheaply and locates them. Anchors catch every rewrite of anchored history, including a complete rewrite by the operator, for every student, whether or not that student kept a receipt. Receipts protect an individual student's own entries, including during the anchoring window. The one case where only receipts help, attack F, lasts at most one anchoring interval. The receipt result is optimistic in one respect: the experiment assumes students hold receipts for all affected entries, whereas in practice only students who download them do. The dashboard's own receipt check uses receipts stored by TrustTrail, which an attacker who also rewrote the receipts table would pass; only downloaded receipts are independent.
+\emph{Interpretation.} The receipts column depends on an assumption built into the harness: every affected entry has a receipt held outside the database. In practice only students who download their receipts hold one, so receipts protect the entries of those students and no others. Attack F is the case where this matters most. Until the next batch, an entry made after the last anchor is protected only if its student has downloaded the receipt; with the default interval this window lasts at most about five minutes plus confirmation time. The other two mechanisms do not depend on student behaviour. The chain catches careless edits and locates them, and the anchors protect all anchored history for every student. Because the expected outcome of each cell was fixed before the run, the table confirms the design; the attacks that the design does not cover, such as TrustTrail omitting a release before it is ever written, are discussed in Section~\ref{sec:discussion}.
 
-\subsection{Violation detection and trust response}
+\subsection{Violation conformance and trust response}
 \label{sec:eval-violation}
 \emph{Method.} The violation experiment models adversaries A1 and A2 with the three scripted services of Section~\ref{sec:implementation}. Each of three repetitions starts by resetting every service to its base tier (the resets are recorded in the ledger). Honest traffic comes first: each honest service receives releases for all five students twice, 30 releases per repetition. Then each bad service misbehaves five times. After each attempt the harness triggers a trust synchronisation and waits until the violation count changes, at most 15\,s, then records the score, tier and cap. An attempt counts as detected if a violation entry with the expected rule appears; a violation with another rule counts as a wrong rule; a violation recorded for an honest service is a false positive.
 
-\emph{Results.} Table~\ref{tab:violations} shows that all 45 attempts were detected with the correct rule. Each first violation lowered the service by one tier, and the tier fell to \emph{blocked} by the second violation for the semi-trusted services and by the first for the untrusted one, after which the service could obtain only the anonymous profile. The 90 honest releases produced no violations and no tier changes. Rule~3 at login, which depends on reading Keycloak's event log, was detected as reliably as the synchronous rules.
+\emph{Results.} Table~\ref{tab:violations} shows that all 45 attempts produced a violation entry with the correct rule, and the 90 honest releases produced no violations and no tier changes. The first violation lowered each service by one tier. The semi-trusted services reached \emph{blocked} at the second violation and the untrusted one at the first, after which they could obtain only the anonymous profile. Rule~3 at login, which TrustTrail learns about from Keycloak's event log, was recorded as reliably as the two rules checked inside \code{/release}.
 
 \begin{table}[t]
 \centering
-\caption{Violation detection: three repetitions of five attempts per scripted service}
+\caption{Violation conformance: three repetitions of five attempts per scripted service}
 \label{tab:violations}
 \small
 \begin{tabularx}{\linewidth}{@{}l >{\raggedright\arraybackslash}X c c >{\raggedright\arraybackslash}p{4.6cm}@{}}
 \toprule
-Service & Misbehaviour (rule) & Detected & Wrong rule & Tier after attempts 1--5 \\
+Service & Misbehaviour (rule) & Recorded & Wrong rule & Tier after attempts 1--5 \\
 \midrule
 Campus Deals & asks for attributes its declaration does not cover (1) & 15/15 & 0 & semi\_trusted $\rightarrow$ untrusted $\rightarrow$ blocked, stays blocked \\
 Alumni Tracker & asks again after its deletion time (2) & 15/15 & 0 & semi\_trusted $\rightarrow$ untrusted $\rightarrow$ blocked, stays blocked \\
@@ -104,69 +107,87 @@ Honest services & 90 releases & \multicolumn{2}{c}{0 false positives} & no tier 
 \end{tabularx}
 \end{table}
 
-\emph{Interpretation.} The rules fire as designed and the feedback loop works: a service that breaks its promise twice is reduced to the anonymous profile within seconds, without human action, both at Keycloak and at release. The Alumni Tracker reaches \emph{blocked} after the same number of violations as Campus Deals although it starts at 85 points, because a score of 60 after one violation still means only one demotion. The 100\% detection rate is a property of scripted clients that misbehave in exactly the ways the rules describe. It does not estimate how often real services misbehave, and it says nothing about misuse after data has left TrustTrail.
+\emph{Interpretation.} The figure 15/15 overstates the amount of independent evidence. Each service starts from its base tier only three times, and after its second violation it is already blocked, so most of the 15 attempts test that a blocked service stays blocked and that further attempts are still recorded. What the experiment shows is that the three rules fire, that the feedback from violations to Keycloak's scope assignment works within the synchronisation interval of 3\,s, and that ordinary traffic is not penalised. The Alumni Tracker reaches \emph{blocked} after the same number of violations as Campus Deals although it starts at 85 points, because a score of 60 after one violation still means one demotion. The rules see only requests: a service that misbehaves without asking TrustTrail for anything is invisible to them.
 
 \subsection{Anchoring cost and delay}
 \label{sec:eval-anchoring}
-\emph{Method.} The anchoring script produces a release about every 2\,s and triggers an anchor every 12\,s, for three batches, and records gas per transaction and the delay from each entry's timestamp to the confirmation of the transaction that anchors it. The contract tests measure the gas of the first anchor on a new contract and of an anchor covering a range of 100{,}000 entries.
+\emph{Method.} The anchoring script produces a release about every 2\,s and triggers an anchor at a fixed interval for three batches. It records the gas used by each transaction, the time from sending a transaction to receiving its receipt, and the delay from each entry's timestamp to the confirmation of the transaction that anchors it. We ran it on the local chain with a 12\,s interval and on Sepolia with a 30\,s interval. On Sepolia we also anchored the existing ledger of 943 entries in one batch, and read every receipt back from the network to obtain gas and fees. The contract tests on the local chain measure an anchor that covers a range of 100{,}000 entries.
 
-\emph{Results.} Every anchor after the first cost 77{,}268 gas, whether it covered 6 entries, 7 entries or a range of 100{,}000 (Table~\ref{tab:gas}). The first anchor on a new contract cost 91{,}659 gas, because it initialises the batch array's storage, and deploying the contract cost 361{,}072 gas. With the 12\,s interval, the delay from entry to anchor had a median of 7.6\,s and a maximum of 12.8\,s over 19 entries; transactions were confirmed in at most 0.05\,s on the local chain.
+\emph{Results.} Table~\ref{tab:gas} shows that gas per anchor did not depend on the number of entries. On the local chain, every anchor after the first cost 77{,}268 gas, for 6, 7 or 100{,}000 entries. On Sepolia, every anchor after the first cost 254{,}408 gas, for 13, 14 or 16 entries, and the first anchor, covering 943 entries, cost 349{,}631. The same contract used more gas on Sepolia than on the local chain for every operation; deployment took 2{,}411{,}192 gas against 361{,}072. We report the Sepolia figures as the realistic ones, since Hardhat's local chain does not necessarily apply the gas schedule of the current public network. Transactions on Sepolia were included in a block 5.8 to 9.7\,s after they were sent, and the delay from entry to anchor had a median of 25.1\,s and a maximum of 40.7\,s over 43 entries with the 30\,s interval (Table~\ref{tab:delay}). On the local chain, which mines a block immediately, the delay was simply the timer: a median of 7.6\,s and a maximum of 12.8\,s with the 12\,s interval. The whole Sepolia run, including deployment, cost 0.0024\,SepoliaETH, almost all of it the deployment. Verifying the whole ledger against Sepolia took about 18\,s for 15 batches, because it reads each batch from the network.
 
 \begin{table}[t]
 \centering
-\caption{Gas cost of anchoring on the local chain (10 November 2026)}
+\caption{Gas used by the anchor contract (10 November 2026)}
 \label{tab:gas}
 \small
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-Operation & Entries covered & Gas \\
+Operation & Entries covered & Local Hardhat chain & Sepolia \\
 \midrule
-Deploy \code{TrustTrailAnchor} & -- & 361{,}072 \\
-First anchor on a new contract & -- & 91{,}659 \\
-Later anchor (three measured batches) & 6, 6, 7 & 77{,}268 each \\
-Later anchor (contract test) & 100{,}000 & 77{,}268 \\
+Deploy \code{TrustTrailAnchor} & -- & 361{,}072 & 2{,}411{,}192 \\
+First anchor on a new contract & 943 on Sepolia & 91{,}659 & 349{,}631 \\
+Later anchors (measured batches) & 6--7 local, 13--16 Sepolia & 77{,}268 each & 254{,}408 each \\
+Later anchor (contract test) & 100{,}000 & 77{,}268 & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\emph{Interpretation.} The cost of anchoring is constant per batch, because the contract stores one 32-byte root and three numbers whatever the batch size. On a public chain the cost per batch is 77{,}268 gas multiplied by the gas price; at 1\,gwei, one anchor costs about 0.000077\,ETH, and a day of continuous traffic at the default 300\,s interval (288 anchors) about 0.022\,ETH. When nothing new is recorded, no transaction is sent. The delay scales with the interval: with the default of 300\,s, an entry waits on average about half the interval and at most one interval plus the block time, roughly 150\,s and 310\,s on a public network. These figures for a public chain are estimates from the local measurements; we did not run on Sepolia.
+\begin{table}[t]
+\centering
+\caption{Delay from ledger entry to confirmed anchor on Sepolia (anchor every 30\,s, a release about every 2\,s)}
+\label{tab:delay}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Batch & Entries & Min (s) & Median (s) & Max (s) & Transaction included after (s) \\
+\midrule
+1 & 13 & 12.4 & 26.7 & 40.7 & 9.65 \\
+2 & 14 & 8.8 & 21.7 & 36.4 & 5.77 \\
+3 & 16 & 8.3 & 25.3 & 38.0 & 6.34 \\
+\midrule
+All & 43 & & 25.1 & 40.7 & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Interpretation.} The cost of anchoring is constant per batch, because the contract stores one 32-byte root and three numbers whatever the batch size. On a network where gas has a price, the cost is 254{,}408 gas times that price per batch: at 1\,gwei this is about 0.00025\,ETH, and a day of continuous traffic at the default 300\,s interval (288 batches) about 0.073\,ETH. When nothing new is recorded, no transaction is sent. These cost figures are estimates for a priced network derived from the gas we measured; on Sepolia itself the gas price during our run was close to zero. The delay is dominated by the interval: with the default of 300\,s, an entry waits on average about half the interval and at most one interval plus the time to include the transaction, which on Sepolia we measured at under 10\,s. Our confirmation times are for inclusion in one block, not for finality, which on Ethereum takes longer; an auditor who wants a stronger guarantee should check anchors some minutes after they appear.
 
 \subsection{Comparison with the base survey's taxonomy}
 \label{sec:eval-taxonomy}
-Table~\ref{tab:taxonomy} places TrustTrail in the taxonomy of Werner et al.~\cite{werner2017survey}, next to the four works in progress from the survey's Table~3. The marks for the four works are copied from the survey. The marks for TrustTrail are our own assessment, with the evidence from this paper; an assessment by authors of their own system is not independent, and we plan to have it repeated by someone who did not build TrustTrail.
+Table~\ref{tab:taxonomy} places TrustTrail in the taxonomy of Werner et al.~\cite{werner2017survey}. For comparison it shows the four works in progress of the survey's Table~3 and the only two proposals in its Table~2 that are marked for accountability, by Suriadi et al.~\cite{suriadi2009usercentric} and Sánchez et al.~\cite{sanchez2012enhancing}. The marks for these six works are copied from the survey. The marks for TrustTrail are our own assessment, with the evidence from this paper; an assessment by authors of their own system is not independent, and we plan to have it repeated by someone who did not build TrustTrail. The survey's marks are binary or ``partial'', and so are ours; a mark records that a characteristic is addressed, not how well.
 
 \begin{table}[t]
 \centering
-\caption{TrustTrail and the authors' works in progress on the nine characteristics of~\cite{werner2017survey}. W1 = Weingärtner (survey ref.~[83]), W2 = Werner et al.~\cite{werner2015approach}, W3 = Bodnar et al.\ (survey ref.~[24]), W4 = Werner et al.~\cite{werner2016model}. Marks for W1--W4 are copied from the survey's Table~3 (``\checkmark'' = marked, ``p'' = partial). TrustTrail's marks are our self-assessment.}
+\caption{TrustTrail and six surveyed works on the nine characteristics of~\cite{werner2017survey}. W1 = Weingärtner (survey ref.~[83]), W2 = Werner et al.~\cite{werner2015approach}, W3 = Bodnar et al.\ (survey ref.~[24]), W4 = Werner et al.~\cite{werner2016model} (survey Table~3); S1 = Suriadi et al.~\cite{suriadi2009usercentric}, S2 = Sánchez et al.~\cite{sanchez2012enhancing} (survey Table~2). Marks for W1--W4 and S1--S2 are copied from the survey (``\checkmark'' = marked, ``p'' = partial). TrustTrail's marks are our self-assessment.}
 \label{tab:taxonomy}
 \small
-\begin{tabularx}{\linewidth}{@{}l c c c c c >{\raggedright\arraybackslash}X@{}}
+\begin{tabularx}{\linewidth}{@{}l c c c c c c c >{\raggedright\arraybackslash}X@{}}
 \toprule
-Characteristic & W1 & W2 & W3 & W4 & TrustTrail & Evidence for TrustTrail \\
+Characteristic & W1 & W2 & W3 & W4 & S1 & S2 & TrustTrail & Evidence for TrustTrail \\
 \midrule
-Transparency & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & declared purpose and deletion date; dashboard lists every release and violation \\
-Controllability & \checkmark & & \checkmark & \checkmark & -- & profiles set by tier, not chosen by the student; per-attribute choice only in a prototype \\
-Minimization & & & & \checkmark & \checkmark & profile caps; tokens carry no claims; release = declared $\cap$ allowed \\
-Accountability & & & & & \checkmark & signed declarations and receipts; hash chain; anchoring; Table~\ref{tab:tamper} \\
-Data quality & \checkmark & & & & -- & IdP treated as the system of record \\
-Use limitation & & & & & p & purpose and deletion date checked at every release; use after release not enforceable \\
-User-friendly & & p & p & p & p & dashboard and receipts; not yet evaluated with users \\
-Trust & \checkmark & & & \checkmark & p & behaviour-driven score and tier; heuristic weights \\
-Obfuscation & & & & \checkmark & p & pairwise \code{sub} and no \code{sid}; anonymous profile still has a pairwise \code{sub} in the ID token \\
+Transparency & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & declared purpose and deletion date; dashboard lists every release and violation \\
+Controllability & \checkmark & & \checkmark & \checkmark & \checkmark & \checkmark & -- & profiles set by tier, not chosen by the student; per-attribute choice only in a prototype \\
+Minimization & & & & \checkmark & \checkmark & & \checkmark & profile caps; tokens carry no claims; release = declared $\cap$ allowed \\
+Accountability & & & & & \checkmark & \checkmark & \checkmark & signed declarations and receipts; hash chain; anchoring on Sepolia; Table~\ref{tab:tamper} \\
+Data quality & \checkmark & & & & \checkmark & & -- & IdP treated as the system of record \\
+Use limitation & & & & & \checkmark & \checkmark & p & purpose and deletion date checked at every release; use after release not enforceable \\
+User-friendly & & p & p & p & & & p & dashboard and receipts; not yet evaluated with users \\
+Trust & \checkmark & & & \checkmark & & \checkmark & p & behaviour-driven score and tier; heuristic weights \\
+Obfuscation & & & & \checkmark & & \checkmark & p & pairwise \code{sub} and no \code{sid}; attribute values and the anonymous profile's \code{sub} can still link \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-The comparison shows where TrustTrail adds to the survey's line of work: accountability and use limitation, which none of the four works address, and a trust level that follows observed behaviour. It also shows what TrustTrail gives up. The authors' works let the user choose a profile at each interaction, which counts towards controllability. TrustTrail decides the profile by the service's tier and the declaration; the student does not choose per release in the running system. Our usability-study prototype adds per-attribute choice to a consent screen, but it is not part of the evaluated system (Section~\ref{sec:future}).
+The comparison shows that TrustTrail is not the first work to address accountability and use limitation; Suriadi et al.\ and Sánchez et al.\ are marked for both. What the table cannot show is the form the accountability takes. The survey describes neither of those two works as producing evidence for the user, or an outside auditor, that the operator cannot later alter, which is the property that our tamper experiment tests. Against the authors' own four works, TrustTrail adds accountability, use limitation and behaviour-driven trust. It also gives something up. The authors' works let the user choose a profile at each interaction, which counts towards controllability. In TrustTrail the service's tier and declaration decide the profile, and the student does not choose per release in the running system. Our usability-study prototype adds per-attribute choice to a consent screen, but it is not part of the evaluated system (Section~\ref{sec:future}).
 
 \subsection{Answers to the research questions}
 \begin{itemize}
-\item \textbf{RQ1} (profiles and linkage): yes, with standard OIDC on the service side. Each service received only its profile's attributes, different pseudonyms, and no session identifier (Section~\ref{sec:eval-functional}); one custom Keycloak mapper was needed for the last property.
-\item \textbf{RQ2} (purpose binding): yes. No release happens without a declaration signed by the service, requests outside it or after its deletion date are refused and recorded, and each release has a receipt bound to the declaration's hash.
-\item \textbf{RQ3} (tamper evidence): yes, for all six attacks tried, including a full rewrite and truncation by the operator, with only hashes on chain (Table~\ref{tab:tamper}); entries newer than the last anchor rely on receipts.
-\item \textbf{RQ4} (trust feedback): yes for the three observable rules; every scripted violation was detected and demoted the service, with no false positives (Table~\ref{tab:violations}).
-\item \textbf{RQ5} (cost): a median of 3.6\,ms per login, and 77{,}268 gas per anchor regardless of batch size.
+\item \textbf{RQ1} (profiles and linkage): yes, as far as identifiers are concerned, with standard OIDC on the service side. Each service received only its profile's attributes, a different pseudonym and no session identifier (Section~\ref{sec:eval-functional}); one custom Keycloak mapper was needed for the last property. Released attribute values can still link students and are outside what TrustTrail controls.
+\item \textbf{RQ2} (purpose binding): yes. No release happens without a declaration signed by the service, requests outside it or after its deletion date are refused and recorded, and each release has a receipt bound to the declaration's hash. Non-repudiation rests on the service's client secret, which authorises key registration.
+\item \textbf{RQ3} (tamper evidence): yes for anchored history. All six attacks were detected as designed, and on Sepolia the anchor check detects rewrites and truncation of anchored history even by the operator, with only hashes on chain (Table~\ref{tab:tamper}). Entries newer than the last anchor rely on receipts that students may or may not hold, and a release that TrustTrail never records is not detected.
+\item \textbf{RQ4} (trust feedback): yes for the three observable rules; every scripted violation was recorded and demoted the service, with no false positives in 90 honest releases (Table~\ref{tab:violations}).
+\item \textbf{RQ5} (cost): a median of 3.2\,ms per login (95\% CI 3.0--3.4\,ms) on one machine, and 254{,}408 gas per anchor on Sepolia regardless of batch size.
 \end{itemize}
 
 \subsection{Threats to validity}
-\emph{Internal validity.} The latency benchmark uses the password grant, which skips the browser redirects; both variants skip them equally, but the TrustTrail variant's token request also differs slightly from the baseline's (pairwise identifier, mapper, no claim mappers). The tamper and violation experiments use attacks and clients that we wrote, and the expected outcomes were fixed in advance by the same team. \emph{External validity.} All measurements come from one laptop with local containers, invented data, five students and six services. A deployment adds network latency, more users and concurrent load. The local chain confirms transactions immediately; a public chain does not. \emph{Construct validity.} The taxonomy marks for TrustTrail are a self-assessment, and the survey's characteristics are broad enough that reasonable assessors could disagree, especially about controllability and trust.
+\emph{Conclusion validity.} The tamper and violation results are conformance tests whose expected outcomes we fixed in advance, so their 100\% figures say that the implementation matches its design, not that the design catches a given share of real attacks. The violation experiment has three independent starts per service, and the tamper experiment five repetitions per attack. The receipt results assume that every affected student keeps receipts. \emph{Internal validity.} The latency benchmark uses the password grant, which skips the browser redirects; both variants skip them equally, but the TrustTrail variant's token request also differs from the baseline's (pairwise identifier, audience and session mappers, no claim mappers). \emph{External validity.} The latency and violation measurements come from one laptop with local containers, invented data, five students and six services; a deployment adds network latency, more users and concurrent load. The anchoring cost and delay come from three batches on a test network with almost free gas; prices and inclusion times on a main network differ. \emph{Construct validity.} The taxonomy marks for TrustTrail are a self-assessment, and the survey's characteristics are broad enough that reasonable assessors could disagree, especially about controllability and trust.

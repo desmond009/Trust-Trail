@@ -105,6 +105,23 @@ def create_trusttrail_client():
     call("POST", f"/{REALM}/users/{sa['id']}/role-mappings/clients/{rm_id}", roles)
 
 
+AUDIENCE_MAPPER = "audience trusttrail"
+
+
+def add_audience_mapper(cid: str):
+    """Put TrustTrail in `aud` of the client's access tokens, so TrustTrail can refuse
+    tokens that were not issued for it. The value is the same for every service,
+    so it adds nothing that links a student across services. Idempotent."""
+    existing = call("GET", f"/{REALM}/clients/{cid}/protocol-mappers/models")
+    if any(m["name"] == AUDIENCE_MAPPER for m in existing):
+        return
+    call("POST", f"/{REALM}/clients/{cid}/protocol-mappers/models", {
+        "name": AUDIENCE_MAPPER, "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+        "config": {"included.client.audience": settings.AUDIENCE,
+                   "access.token.claim": "true", "id.token.claim": "false",
+                   "introspection.token.claim": "true"}})
+
+
 def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str):
     order = settings.profiles()["order"]
     cap = settings.tier_cap(svc["tier"])
@@ -149,6 +166,7 @@ def create_service_client(sid: str, svc: dict, profile_ids: dict, basic_id: str)
         "name": "pairwise subject identifier", "protocol": "openid-connect",
         "protocolMapper": "oidc-sha256-pairwise-sub-mapper",
         "config": {"sectorIdentifierUri": "", "pairwiseSubAlgorithmSalt": ""}})
+    add_audience_mapper(cid)
     # Our SPI (keycloak/strip-sid-mapper): without it every service in one
     # SSO session receives the same `sid`, which links the pairwise IDs.
     call("POST", f"/{REALM}/clients/{cid}/protocol-mappers/models", {

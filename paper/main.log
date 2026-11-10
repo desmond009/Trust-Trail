@@ -963,60 +963,81 @@ LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
 [2]) (sections/02-background [3]
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
 (Font)              scaled to size 10.44997pt on input line 16.
- [4]) (sections/03-base-paper [5] [6] [7])
-(sections/04-related-work [8] [9]) (sections/05-threat-model [10] [11])
-(sections/06-architecture [12] [13]
+ [4] [5]) (sections/03-base-paper [6] [7])
+(sections/04-related-work [8] [9] [10]) (sections/05-threat-model [11] [12])
+(sections/06-architecture [13] [14]
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/it' will be
 (Font)              scaled to size 10.44997pt on input line 71.
- [14]) (sections/07-design [15] [16]
+ [15]) (sections/07-design [16] [17]
 Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on i
-nput line 57.
+nput line 60.
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
-(Font)              scaled to size 8.54997pt on input line 57.
+(Font)              scaled to size 8.54997pt on input line 60.
 
-[17]
-Underfull \hbox (badness 10000) in paragraph at lines 131--131
+[18]
+Underfull \hbox (badness 10000) in paragraph at lines 134--134
 []|\TU/texgyrecursor(0)/m/n/10 undeclared_attribute\TU/texgyretermes(0)/m/n/10 
 , \TU/texgyrecursor(0)/m/n/10 after_retention\TU/texgyretermes(0)/m/n/10 ,
  []
 
-[18] [19]
+[19] [20]
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
-(Font)              scaled to size 7.31494pt on input line 183.
+(Font)              scaled to size 7.31494pt on input line 186.
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
-(Font)              scaled to size 5.22498pt on input line 183.
+(Font)              scaled to size 5.22498pt on input line 186.
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
-(Font)              scaled to size 5.69998pt on input line 195.
+(Font)              scaled to size 5.69998pt on input line 198.
 LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/n' will be
-(Font)              scaled to size 4.74998pt on input line 195.
- [20]
+(Font)              scaled to size 4.74998pt on input line 198.
+ [21] [22]
 Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on in
-put line 253.
-) (sections/08-implementation [21] [22] [23])
-(sections/09-evaluation [24]
+put line 256.
+) (sections/08-implementation [23] [24] [25])
+(sections/09-evaluation [26]
 File: figures/latency_ecdf.pdf Graphic file (type pdf)
 <use figures/latency_ecdf.pdf>
- [25] [26] [27] [28]) (sections/10-discussion
-[29]) (sections/11-future-work [30]) (sections/12-conclusion [31])
-(sections/13-backmatter) (sections/appendix [32] [33]) (main.bbl [34]
-Underfull \hbox (badness 5592) in paragraph at lines 172--176
+ [27] [28] [29] [30]) (sections/10-discussion
+[31] [32] [33]) (sections/11-future-work [34]) (sections/12-conclusion [35])
+(sections/13-backmatter
+Overfull \hbox (66.40454pt too wide) in paragraph at lines 9--10
+\TU/texgyretermes(0)/m/n/11 used in the evaluation is deployed on the Sepolia t
+est network at address \TU/texgyrecursor(0)/m/n/11 0x3415e1C6B20E184EA493007A56
+589Cebf2074BC8\TU/texgyretermes(0)/m/n/11 ,
+ []
+
+) (sections/appendix [36] [37]) (main.bbl [38]
+Underfull \hbox (badness 5592) in paragraph at lines 98--102
 []\TU/texgyretermes(0)/m/n/9 P. Todd, “OpenTimestamps: Scalable, trust-minimize
 d, distributed timestamping with Bitcoin,” []$[][][][][] [] [] [] [][][][][][][
 ][][] [] [][][] [] [][][][] []
  []
 
-[35]
+[39]
 Underfull \hbox (badness 10000) in paragraph at lines 294--297
 []\TU/texgyretermes(0)/m/n/9 C. Allen, “The path to self-sovereign identity,” L
 ife With Alacrity (blog). []$[][][][][] [] [] [] [][][] [] [][][][][][][][][][]
 [][][][][][] [] [][][] [] [][][][] [] [][] []
  []
 
-) [36] (main.aux)
+
+Underfull \hbox (badness 5756) in paragraph at lines 365--370
+[]\TU/texgyretermes(0)/m/n/9 European Data Protection Board, “Guidelines 02/202
+5 on processing of personal data through blockchain technolo-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 365--370
+\TU/texgyretermes(0)/m/n/9 gies (version for public consultation),” []$[][][][]
+[] [] [] [] [][][] [] [][][][] [] [][][][][][] [] [][] [] [][][][][][][][][][][
+][][][][][] [] [][][][][][][][][] [] [][][][][][][][][][][][][][][][][][][][][]
+ [] [][][][] []
+ []
+
+) [40] (main.aux)
 
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: E8555A92661930B8C8D2353C651A275F;18231.
+(rerunfilecheck)             Checksum: 7218611276672F589EF79471DC368380;19010.
  )
-Output written on main.xdv (36 pages, 1523116 bytes).
+Output written on main.xdv (40 pages, 1756800 bytes).

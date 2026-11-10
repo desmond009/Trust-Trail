@@ -31,7 +31,8 @@ We consider the following adversaries. Each is a role that a party may take, not
 \begin{itemize}
 \item The IdP is honest and correctly configured: it authenticates students correctly, signs tokens with keys that only it holds, and grants a client only the scopes assigned to it.
 \item TrustTrail runs its code faithfully \emph{at the time of a release}. Adversary A5 may tamper with its stored data afterwards, but we do not consider a TrustTrail that lies while writing an entry; Section~\ref{sec:discussion} discusses this case.
-\item Each service keeps its declaration-signing key and its client secret private. A stolen key lets the thief sign in the service's name.
+\item Each service keeps its declaration-signing key and its client secret private. A stolen key lets the thief sign in the service's name. Registering a key requires only the service's client secret, and the key registry is held by TrustTrail, so the client secret is the root of trust for non-repudiation.
+\item TrustTrail holds the receipt-signing key and the anchoring key, and owns the anchor contract. The operator can therefore anchor whatever its ledger contains; what it cannot do is change or remove a batch once it is on chain.
 \item The anchor contract runs on a chain that the operator cannot rewrite. A local development chain does not meet this assumption; a public network does.
 \item Communication uses TLS in a real deployment. Our local deployment uses plain HTTP between containers on one machine.
 \item Hash functions (SHA-256) and signature schemes (ECDSA P-256, RSA) are secure.
@@ -50,10 +51,10 @@ Table~\ref{tab:goals} lists the design goals, the adversaries each goal addresse
 Goal & Statement & Adversaries & Survey characteristic \\
 \midrule
 G1 & A service receives at most the attributes of the profile allowed by its current tier, and only those its declaration covers. & A1 & Minimization, controllability \\
-G2 & Services cannot link a student across services through identifiers or session values in tokens. & A3 & Obfuscation (pseudonym), unlinkability \\
+G2 & No identifier or session value in the tokens or releases lets services link a student across services. (Released attribute values may still link; see non-goals.) & A3 & Obfuscation (pseudonym), unlinkability \\
 G3 & Every release is covered by a service-signed declaration of purpose and deletion date; requests outside the declaration or after the date are refused. & A1, A2 & Use limitation \\
-G4 & The service cannot deny its declaration, and TrustTrail cannot deny a release it receipted. & A4 & Accountability (policies) \\
-G5 & Any change, deletion or truncation of recorded entries is detectable, also when the operator does it. & A5 & Accountability (traceability) \\
+G4 & A service cannot deny a declaration signed with its registered key, and TrustTrail cannot deny a release it receipted. & A4 & Accountability (policies) \\
+G5 & Any change, deletion or truncation of entries that have been anchored on a chain the operator cannot rewrite is detectable, also when the operator makes it; newer entries are protected by the chain and by receipts. & A5 & Accountability (traceability) \\
 G6 & Observed violations lower a service's trust and, through its tier, what it can obtain. & A1, A2 & Trust \\
 G7 & A student can see every release and refused rule break that concerns them, and verify each one independently. & A4, A5 & Transparency, user-friendliness \\
 G8 & Services use standard OIDC plus signed JSON; the added latency per login stays in the order of milliseconds. & -- & (deployability) \\
@@ -67,6 +68,7 @@ Some threats are outside TrustTrail's scope. We list them explicitly so the guar
 \item \emph{Use after release.} Once a service holds data, TrustTrail cannot see whether it is used for the declared purpose or deleted on time. Rule~2 catches only a service that asks again.
 \item \emph{IdP tracking.} Keycloak sees every login. The protocols in Section~\ref{sec:related} address this.
 \item \emph{Traffic analysis.} Services that compare login times or network addresses may still correlate pseudonyms. TrustTrail removes identifiers, not timing.
+\item \emph{Linking through attribute values.} The attributes that a profile releases, such as department, programme and year, can together single out a student in a small cohort, and the total profile releases name, e-mail address and roll number. Colluding services that hold such values can join their records without any identifier. TrustTrail limits which attributes each service receives; it does not make the released values unlinkable.
 \item \emph{A dishonest release service.} If TrustTrail itself omits a release from the ledger, anchoring cannot reveal an entry that was never written; only the receipt held by the student is counter-evidence.
 \item \emph{Availability.} Denial-of-service against Keycloak, TrustTrail or the chain is not addressed.
 \end{itemize}

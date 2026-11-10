@@ -1,15 +1,15 @@
 # Login latency with and without the privacy layer
 
-_Generated 2026-11-10 07:14 UTC by `latency`; fake data, local machine._
+_Generated 2026-11-10 10:54 UTC by `latency`; fake data, local machine._
 
 | Variant | Runs | Median (ms) | p95 (ms) | Mean (ms) | Min (ms) | Max (ms) |
 |---|---|---|---|---|---|---|
-| Plain OIDC login (no privacy layer) | 200 | 16.0 | 20.2 | 16.7 | 15.1 | 49.4 |
-| TrustTrail login + release (total) | 200 | 19.6 | 25.6 | 20.1 | 17.9 | 31.0 |
-|   of which: Keycloak token | 200 | 15.9 | 20.8 | 16.4 | 14.9 | 24.6 |
-|   of which: TrustTrail /release | 200 | 3.6 | 5.1 | 3.8 | 2.8 | 6.4 |
+| Plain OIDC login (no privacy layer) | 200 | 15.5 | 20.6 | 16.4 | 14.7 | 31.2 |
+| TrustTrail login + release (total) | 200 | 18.6 | 24.0 | 19.5 | 17.4 | 41.2 |
+|   of which: Keycloak token | 200 | 15.3 | 18.8 | 15.9 | 14.5 | 37.5 |
+|   of which: TrustTrail /release | 200 | 3.5 | 4.9 | 3.6 | 2.7 | 6.4 |
 
-Overhead of the privacy layer: median **+3.6 ms** (+22%), p95 **+5.5 ms**.
+Overhead of the privacy layer: median **+3.2 ms** (+21%), p95 **+3.4 ms**.
 
 Password grant on one laptop, all containers local; a browser login adds the same redirects to both variants. TrustTrail's token request is itself slightly different (pairwise ID, sid stripped, no claim mappers). Anchoring is asynchronous and not included.
 

@@ -18,8 +18,9 @@ for v, xs in data.items():
     ax.step(xs, [(i + 1) / n for i in range(n)], where="post", lw=2, **style[v])
     m = statistics.median(xs)
     ax.plot([m], [0.5], marker="o", ms=6, color=style[v]["color"], mec="white", mew=1.5, zorder=3)
-    ax.annotate(f"median {m:.1f} ms", (m, 0.5), xytext=(6, -14 if v == "baseline" else 6),
-                textcoords="offset points", fontsize=8, color="#333333")
+    left = v == "baseline"
+    ax.annotate(f"median {m:.1f} ms", (m, 0.5), xytext=(-8 if left else 8, 2),
+                textcoords="offset points", fontsize=8, color="#333333", ha="right" if left else "left")
 ax.set_xlim(12, 35)
 ax.set_ylim(0, 1.02)
 ax.set_xlabel("Login latency (ms), 200 runs per variant")

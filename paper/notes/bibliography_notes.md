@@ -86,3 +86,13 @@ Relevance notes are based on titles/abstracts/title pages actually seen, kept de
 - wood2014ethereum: year set to 2025 because the PDF I read is the Shanghai version dated 2025-02-04; original paper is 2014.
 - nist80063c: cites revision 4 (2025); the 2017 revision 3 differs.
 - chainpoint, allen2016path, todd2016opentimestamps: web sources, titles confirmed but no stable archival DOI.
+
+## Added in revision 1 (verified Nov. 10, 2026)
+| key | relevance | verified how |
+|---|---|---|
+| rfc3161 | trusted timestamping alternative to anchoring | RFC Editor JSON |
+| rfc8707 | OAuth resource indicators (audience restriction) | RFC Editor JSON |
+| rfc9068 | JWT access-token profile (aud, client_id) | RFC Editor JSON |
+| park2004ucon | usage control (obligations) | Crossref 10.1145/984334.984339 |
+| edpb2025blockchain | EDPB draft guidelines on blockchain and personal data | EDPB page fetched (title, consultation date) |
+DPDP Act sections used (2(i),(j),(k), 5, 6, 7, 8(7), 8(10), 9(1), 2(f), 11, 12, 13): checked in the Gazette PDF text.

@@ -1,6 +1,6 @@
 # Violation detection test
 
-_Generated 2026-11-10 07:14 UTC by `violations`; fake data, local machine._
+_Generated 2026-11-10 10:54 UTC by `violations`; fake data, local machine._
 
 | Service | Misbehaviour | Rule | Attempts | Detected | Missed | Wrong rule | Detection rate | Tier after each attempt (every repetition) | Max profile |
 |---|---|---|---|---|---|---|---|---|---|

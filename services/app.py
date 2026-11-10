@@ -85,30 +85,77 @@ def current_declaration() -> dict:
 
 # --- pages ---------------------------------------------------------------------
 
+ACCENTS = {"library": ("#0e9f6e", "#0b7d57"), "lms": ("#4f46e5", "#7c3aed"), "exam": ("#d97706", "#b45309")}
+ICONS = {"library": "M4 19.5A2.5 2.5 0 016.5 17H20M4 19.5A2.5 2.5 0 006.5 22H20V2H6.5A2.5 2.5 0 004 4.5v15z",
+         "lms": "M22 10L12 5 2 10l10 5 10-5zM6 12v5c3 2 9 2 12 0v-5",
+         "exam": "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"}
+
+CSS = """
+:root{--bg:#f5f6fa;--surface:#fff;--surface-2:#f0f2f7;--line:#e3e6ee;--fg:#141a2a;--muted:#5f6880;--code:#0f1420;--code-fg:#d6dcf0}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1017;--surface:#151a24;--surface-2:#1c2230;--line:#262d3d;--fg:#e8ebf3;--muted:#9aa3b8;--code:#0a0d14}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
+.top{background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff}.top .wrap{display:flex;align-items:center;gap:14px;padding:22px 20px}
+.wrap{max-width:820px;margin:0 auto;padding:0 20px}.icon{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.18);display:grid;place-items:center}
+h1{margin:0;font-size:22px;letter-spacing:-.01em}.top small{opacity:.85}main{padding:24px 0 48px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 14px;box-shadow:0 1px 2px rgba(20,26,42,.04),0 4px 16px rgba(20,26,42,.06)}
+.card h2{margin:0 0 6px;font-size:17px}.muted{color:var(--muted);font-size:14px}.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{font-size:13px;font-weight:600;padding:3px 9px;border-radius:8px;background:color-mix(in srgb,var(--a1) 14%,var(--surface));color:var(--a2)}
+@media (prefers-color-scheme:dark){.chip{color:#fff}}
+.purpose{border-left:3px solid var(--a1);padding:2px 0 2px 12px;margin:10px 0;color:var(--fg)}
+.btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-weight:600;text-decoration:none;color:#fff;background:linear-gradient(135deg,var(--a1),var(--a2));padding:10px 18px;border-radius:10px}
+.btn.ghost{background:var(--surface);color:var(--fg);border:1px solid var(--line)}.btn:hover{filter:brightness(1.06)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.kv{background:var(--surface-2);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--muted)}
+.kv b{display:block;color:var(--fg);font-size:15px}
+.panel h3{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+pre{margin:0;background:var(--code);color:var(--code-fg);padding:14px 16px;border-radius:10px;overflow:auto;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.bad{color:#c62f2f;font-weight:600}@media (max-width:640px){.grid{grid-template-columns:1fr}}
+"""
+
+
 def page(body: str) -> HTMLResponse:
-    return HTMLResponse(f"""<!doctype html><meta charset=utf-8><title>{SVC['name']}</title>
-<style>body{{font-family:system-ui;max-width:760px;margin:2rem auto;padding:0 1rem}}
-pre{{background:#f4f4f4;padding:1rem;overflow:auto}}</style>
-<h1>{SVC['name']}</h1><p><small>invented test service · asks for profile <b>{SVC['wants']}</b></small></p>{body}""")
+    a1, a2 = ACCENTS.get(SERVICE_ID, ("#4f46e5", "#7c3aed"))
+    icon = ICONS.get(SERVICE_ID, ICONS["lms"])
+    return HTMLResponse(f"""<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>{SVC['name']}</title>
+<style>:root{{--a1:{a1};--a2:{a2}}}{CSS}</style>
+<header class=top><div class=wrap><div class=icon><svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2 stroke-linecap=round stroke-linejoin=round><path d="{icon}"/></svg></div>
+<div><h1>{SVC['name']}</h1><small>Invented test service · asks Keycloak for the <b>{SVC['wants']}</b> profile</small></div></div></header>
+<main><div class=wrap>{body}</div></main></html>""")
 
 
 def pre(title: str, data) -> str:
-    return f"\n<h3>{title}</h3><pre>{html.escape(json.dumps(data, indent=2))}</pre>\n"
+    return f"<section class='card panel'>\n<h3>{title}</h3><pre>{html.escape(json.dumps(data, indent=2))}</pre>\n</section>"
+
+
+def chips(names) -> str:
+    return "<div class=chips>" + "".join(f"<span class=chip>{html.escape(str(n))}</span>" for n in names) + "</div>"
 
 
 @app.get("/")
 def home(request: Request):
     seen = request.session.get("seen")
+    spec = SVC["declaration"]
     if not seen:
-        spec = SVC["declaration"]
-        return page(f"""<p>This service promises to use <b>{', '.join(spec['attributes'])}</b>
-only to: <i>{html.escape(spec['purpose'])}</i> and to delete it within {spec['retention_days']} days.</p>
-<p><a href="/login">Log in with university SSO</a></p>""")
-    return page("<h2>What this service learned</h2>"
+        return page(f"""<section class=card><h2>What this service promises</h2>
+<p class=muted>Before it receives anything, the service signs this promise. TrustTrail refuses any request it does not cover.</p>
+{chips(spec['attributes'])}
+<p class=purpose>{html.escape(spec['purpose'])}</p>
+<div class=grid><div class=kv><b>{spec['retention_days']} days</b>kept at most</div>
+<div class=kv><b>{html.escape(SVC['wants'])}</b>profile requested</div>
+<div class=kv><b>{html.escape(SVC['tier'].replace('_', ' '))}</b>base trust tier</div></div></section>
+<p><a class=btn href="/login">Log in with university SSO</a></p>""")
+    released = (seen.get("release") or {}).get("released")
+    summary = (f"<section class=card><h2>What this service received</h2>"
+               f"<p class=muted>Attribute values come only from TrustTrail, under the signed promise above. "
+               f"The Keycloak token itself carries no personal data.</p>{chips(released)}</section>"
+               if released else
+               f"<section class=card><h2>Release refused</h2><p class=bad>"
+               f"{html.escape(str((seen.get('release') or {}).get('error', 'unknown error')))}</p></section>")
+    return page(summary
                 + pre("From Keycloak (ID token)", seen["id_token"])
                 + pre("From TrustTrail (/release)", seen["release"])
                 + pre("Receipt payload (signed by TrustTrail)", seen.get("receipt"))
-                + '<p><a href="/logout">Log out</a></p>')
+                + '<p><a class="btn ghost" href="/logout">Log out</a></p>')
 
 
 @app.get("/login")

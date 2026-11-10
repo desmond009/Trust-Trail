@@ -1,6 +1,8 @@
 """Against the running, seeded stack. Run inside the trusttrail container:
     docker compose exec trusttrail pytest
 """
+import os
+
 import httpx
 import pytest
 
@@ -92,3 +94,23 @@ def test_release_rejects_forged_token():
     tok = login("library", "asha", "pseudonym").json()["access_token"]
     head, body, sig = tok.split(".")
     assert release(f"{head}.{body}.{sig[:-4]}AAAA").status_code == 401
+
+
+def test_service_tokens_name_trusttrail_as_audience():
+    tok = login("lms", "asha", "partial").json()["access_token"]
+    aud = claims(tok)["aud"]
+    assert settings.AUDIENCE in (aud if isinstance(aud, list) else [aud])
+
+
+def test_release_rejects_token_not_issued_for_trusttrail():
+    # bench-baseline is an ordinary Keycloak client without the audience mapper:
+    # a valid, signed realm token, but not one meant for TrustTrail.
+    r = httpx.post(f"{settings.OIDC_BASE}/token", data={
+        "grant_type": "password", "client_id": "bench-baseline",
+        "client_secret": os.environ["BENCH_BASELINE_CLIENT_SECRET"],
+        "username": "asha", "password": os.environ["STUDENT_DEMO_PASSWORD"], "scope": "openid"})
+    tok = r.json()["access_token"]
+    aud = claims(tok).get("aud")
+    assert settings.AUDIENCE not in (aud if isinstance(aud, list) else [aud])
+    res = release(tok)
+    assert res.status_code == 401 and res.json()["error"] == "invalid_token"

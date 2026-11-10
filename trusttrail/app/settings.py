@@ -8,6 +8,9 @@ KC_INTERNAL_URL = os.environ.get("KC_INTERNAL_URL", "http://keycloak:8080")
 KC_PUBLIC_URL = os.environ.get("KC_PUBLIC_URL", "http://localhost:8080")
 REALM = os.environ.get("KC_REALM", "trusttrail")
 ISSUER = f"{KC_PUBLIC_URL}/realms/{REALM}"
+# Audience that Keycloak puts in service tokens (audience mapper on every service
+# client, see scripts/seed.py). TrustTrail accepts only tokens meant for it.
+AUDIENCE = os.environ.get("TT_AUDIENCE", "trusttrail")
 OIDC_BASE = f"{KC_INTERNAL_URL}/realms/{REALM}/protocol/openid-connect"
 
 TT_CLIENT_ID = "trusttrail"

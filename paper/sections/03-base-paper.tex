@@ -49,6 +49,8 @@ Obfuscation      &  6 & 3 & 1 \\
 
 The numbers suggest a pattern. Most work concentrates on the moment of disclosure: telling the user what will be released (transparency), letting the user choose (controllability) and releasing less (minimization). Far less work addresses what happens around and after the disclosure: whether the release can be traced and audited later (accountability), and whether the service's use is bound to a stated reason and time (use limitation). For students, these are exactly the missing pieces. A student who never sees a record of releases cannot exercise any control after the fact, and a promise of deletion that nobody records cannot be checked.
 
+Two cautions apply to this reading. First, the counts are coarse. The survey marks a characteristic as present or absent; a mark says nothing about how deeply a work addresses it, and we did not re-score the 23 works ourselves. Second, accountability and use limitation are not the only rare characteristics: data quality and user-friendliness are also marked for only 2 of the 23 proposals. We do not choose accountability and use limitation because their counts are lowest. We choose them because they match the problem in Section~\ref{sec:intro}, where releases leave no record and nothing ties a release to a purpose or a deletion date, and because the survey itself names ensuring that policies are implemented as an open challenge (Section~4.5 of the survey). Data quality matters less in a campus federation, where the IdP is the institute's system of record, and we treat user-friendliness as future work that needs a user study (Section~\ref{sec:future}).
+
 \subsection{The survey's open challenges}
 The survey's Section~4 lists five challenges and directions for privacy-based IdM in the cloud. We summarise each and note what is still open.
 
@@ -88,8 +90,8 @@ Reliability assessment (4.1); static trust & Trust must follow observed behaviou
 Agreement of privacy options (4.2); purposes without enforcement & The service must commit to attributes, purpose and deletion date before any release, in a form it cannot later deny. & Signed purpose declarations; releases refused outside them; signed receipts (Sec.~\ref{sec:design-declarations}). \\
 Interaction profiles (4.3) & The IdP and the release service must both enforce the profile, and services must not be able to link students. & Keycloak scope assignment as tier cap; pairwise \code{sub}; \code{sid} removed by a custom mapper (Sec.~\ref{sec:design-profiles}). \\
 Granular control (4.4) & A service may ask for a subset of its profile. & Per-request attribute list checked against declaration and profile (Sec.~\ref{sec:design-declarations}). \\
-Ensuring policy implementation (4.5); no evidence trail & Every release and every rule break must be recorded so that later changes are detectable, even by the operator. & Hash-chained ledger, receipts, Merkle anchoring on Ethereum (Secs.~\ref{sec:design-ledger}, \ref{sec:design-anchoring}). \\
-Proposals without implementations & The design must run on a current IdP and be measured. & Keycloak 26 implementation, 155 tests, evaluation (Secs.~\ref{sec:implementation}, \ref{sec:evaluation}). \\
+Ensuring policy implementation (4.5); no evidence trail & Every release and every rule break must be recorded so that later changes to anchored history are detectable, even when the operator makes them. & Hash-chained ledger, receipts, Merkle anchoring on Ethereum (Secs.~\ref{sec:design-ledger}, \ref{sec:design-anchoring}). \\
+Proposals without implementations & The design must run on a current IdP and be measured. & Keycloak 26 implementation, 157 tests, evaluation (Secs.~\ref{sec:implementation}, \ref{sec:evaluation}). \\
 \bottomrule
 \end{tabularx}
 \end{table}

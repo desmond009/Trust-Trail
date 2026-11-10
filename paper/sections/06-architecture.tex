@@ -62,13 +62,13 @@ Two background threads run inside TrustTrail: the trust thread synchronises with
 Three invented campus services, a Digital Library, a Learning System and an Examination Portal, demonstrate honest behaviour. They share one small FastAPI application (136 lines) configured by a service identifier. Three further scripted services, which we call Campus Deals, Alumni Tracker and Career Portal, each break one rule on purpose and are used in the evaluation.
 
 \subsubsection{Chain}
-A local Hardhat~3 node runs an in-memory Ethereum chain, and a one-shot container deploys the \code{TrustTrailAnchor} contract (Solidity~0.8.28) and writes its address and ABI to a deployment file that TrustTrail reads. The same contract can be deployed to the Sepolia test network by changing configuration.
+A local Hardhat~3 node runs an in-memory Ethereum chain, and a one-shot container deploys the \code{TrustTrailAnchor} contract (Solidity~0.8.28) and writes its address and ABI to a deployment file that TrustTrail reads. The same contract is deployed on the Sepolia public test network, and TrustTrail is switched between the two chains by configuration; Section~\ref{sec:eval-anchoring} reports measurements on both.
 
 \subsection{Data stores and trust boundaries}
 Each party holds a different part of the state, which limits what any single compromised store reveals.
 \begin{itemize}
 \item \emph{Keycloak} holds the student records (name, e-mail, roll number, department, programme, year, affiliation), the client definitions and each client's random pairwise salt.
-\item \emph{\code{trusttrail.db}} holds service public keys, declarations, the ledger, stored receipts, trust state, cached anchor metadata and processed event identifiers. The ledger contains attribute \emph{names}, pseudonyms and hashes, never attribute values and never a student's real user ID.
+\item \emph{\code{trusttrail.db}} holds service public keys, declarations, the ledger, stored receipts, trust state, cached anchor metadata and processed event identifiers. The ledger contains attribute \emph{names}, pseudonyms and hashes, never attribute values and never a student's real user ID. Because the identity map can link each pseudonym to a student, the ledger is still personal data in pseudonymised form (Section~\ref{sec:discussion-ledger}).
 \item \emph{\code{identity\_map.db}} is a separate file that maps each (service, pseudonym) pair to the Keycloak user ID. It is needed to fetch attribute values and to show a student their own entries. Keeping it apart from the ledger means the ledger can be inspected, exported or audited without revealing who is who.
 \item TrustTrail's receipt-signing key, an EC P-256 private key, is generated on first use into TrustTrail's data volume with file mode 0600. Each service's declaration-signing key is generated into a volume that only the services mount. No private key is stored in the source repository.
 \item The \emph{chain} holds, per batch, a 32-byte root, the first and last entry numbers and a timestamp.

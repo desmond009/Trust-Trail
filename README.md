@@ -661,7 +661,10 @@ limits section. **No real study has been run yet.** Those numbers come from your
   a returning student.
 - **We only see requests made to our system.** TrustTrail controls attribute values because
   Keycloak tokens contain none. It cannot control what a service does with data afterwards.
-- Access tokens are checked locally (signature, issuer, expiry). Revocation before expiry is not checked.
+- Access tokens are checked locally (signature, issuer, expiry, and `aud` must contain `trusttrail`;
+  every service client has an audience mapper for it). Revocation before expiry is not checked.
+  Realms seeded before the audience check: run `docker compose exec trusttrail python -m scripts.add_audience`
+  (adds the mapper without resetting the realm, so pseudonyms and the ledger stay valid).
 
 ## Known limits (Phase 2)
 

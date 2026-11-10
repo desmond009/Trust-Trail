@@ -75,7 +75,8 @@ def test_proof_leads_to_the_on_chain_root_without_revealing_entries():
 def test_whole_ledger_verifies_against_the_chain():
     new_release()
     anchor_now()
-    result = httpx.get(f"{TRUSTTRAIL}/anchors/verify").json()
+    # One RPC call per batch: seconds on a public chain such as Sepolia.
+    result = httpx.get(f"{TRUSTTRAIL}/anchors/verify", timeout=180).json()
     assert result["ok"] and result["failures"] == [] and result["unanchored_entries"] == 0
 
 

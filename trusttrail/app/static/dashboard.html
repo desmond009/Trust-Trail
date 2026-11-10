@@ -5,132 +5,355 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TrustTrail · My data releases</title>
 <style>
-  :root { --fg:#1d2433; --muted:#5d6678; --line:#dfe3ea; --bg:#f7f8fa; --ok:#1e7d4f; --bad:#b3261e; --accent:#2f5bd3; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--fg); background:var(--bg); }
-  header { background:#fff; border-bottom:1px solid var(--line); padding:16px; }
-  header .wrap { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
-  .wrap { max-width:1100px; margin:0 auto; }
-  main { padding:16px; }
-  h1 { font-size:20px; margin:0; }
-  .muted { color:var(--muted); font-size:13px; }
-  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
-  table { width:100%; border-collapse:collapse; }
-  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
-  .tag { display:inline-block; background:#eef1f6; border-radius:4px; padding:1px 6px; margin:1px 2px 1px 0; font-size:13px; }
-  .overdue { color:var(--bad); font-weight:600; }
-  button, .btn { font:inherit; font-size:13px; border:1px solid var(--line); background:#fff; border-radius:6px;
-                 padding:4px 10px; cursor:pointer; color:var(--fg); text-decoration:none; display:inline-block; margin:2px 0; }
-  .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .result { font-size:13px; margin-top:6px; }
-  .result li { list-style:none; }
-  .pass { color:var(--ok); } .fail { color:var(--bad); }
-  .status { font-weight:600; }
-  tr.refused { background:#fdf3f2; }
-  @media (max-width: 720px) {
-    thead { display:none; }
-    tr { display:block; border-bottom:1px solid var(--line); padding:8px 0; }
-    td { display:block; border:0; padding:4px 0; }
-    td::before { content: attr(data-label) ": "; color:var(--muted); font-size:12px; }
+  :root {
+    --bg: #f5f6fa; --surface: #ffffff; --surface-2: #f0f2f7; --line: #e3e6ee;
+    --fg: #141a2a; --muted: #5f6880; --faint: #8a92a6;
+    --accent: #4f46e5; --accent-2: #7c3aed; --accent-soft: #eef0ff;
+    --ok: #0f8a5f; --ok-soft: #e6f6ef; --bad: #c62f2f; --bad-soft: #fdeeee; --warn: #b26a00; --warn-soft: #fff4e0;
+    --shadow: 0 1px 2px rgba(20,26,42,.04), 0 4px 16px rgba(20,26,42,.06);
+    --radius: 14px;
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1017; --surface: #151a24; --surface-2: #1c2230; --line: #262d3d;
+      --fg: #e8ebf3; --muted: #9aa3b8; --faint: #6f7890;
+      --accent: #8b85ff; --accent-2: #b48cff; --accent-soft: #232347;
+      --ok: #3ccf91; --ok-soft: #12291f; --bad: #ff7a7a; --bad-soft: #321a1d; --warn: #f5b450; --warn-soft: #2e2414;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  /* top bar */
+  .topbar { position: sticky; top: 0; z-index: 10; backdrop-filter: saturate(1.4) blur(10px);
+            background: color-mix(in srgb, var(--surface) 82%, transparent); border-bottom: 1px solid var(--line); }
+  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding-top: 10px; padding-bottom: 10px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.01em; }
+  .logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+          background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .brand small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); letter-spacing: 0; }
+  .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .user { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700;
+            color: var(--accent); background: var(--accent-soft); }
+
+  /* buttons */
+  .btn { font: inherit; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+         border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 10px;
+         padding: 7px 13px; cursor: pointer; text-decoration: none; transition: background .15s, border-color .15s, transform .05s; }
+  .btn:hover { background: var(--surface-2); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.07); }
+  .btn.sm { font-size: 13px; padding: 5px 10px; border-radius: 8px; }
+  .btn:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  main { padding: 28px 0 48px; }
+  h1 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+
+  /* status banner */
+  .status { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius);
+            border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); margin-bottom: 18px; }
+  .status .dot { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .status.ok .dot { background: var(--ok-soft); color: var(--ok); }
+  .status.bad .dot { background: var(--bad-soft); color: var(--bad); }
+  .status.wait .dot { background: var(--surface-2); color: var(--muted); }
+  .status b { display: block; }
+  .status span { color: var(--muted); font-size: 13px; }
+
+  /* stats */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .stat .n { font-size: 26px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 13px; color: var(--muted); }
+  .stat.alert .n { color: var(--bad); }
+
+  /* toolbar */
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
+  .seg button { font: inherit; font-size: 13px; font-weight: 600; border: 0; background: none; color: var(--muted);
+                padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  select, input[type=search] { font: inherit; font-size: 14px; color: var(--fg); background: var(--surface);
+                 border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; }
+  input[type=search] { flex: 1; min-width: 180px; }
+
+  /* entries */
+  .list { display: grid; gap: 12px; }
+  .entry { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px;
+           box-shadow: var(--shadow); display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; }
+  .entry.refused { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); background:
+                   linear-gradient(0deg, color-mix(in srgb, var(--bad-soft) 55%, var(--surface)), var(--surface)); }
+  .entry > * { min-width: 0; }
+  .svc { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-weight: 750; color: #fff; font-size: 15px; }
+  .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .head h3 { margin: 0; font-size: 16px; }
+  .badge { white-space: nowrap; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+  .badge.bad { background: var(--bad-soft); color: var(--bad); }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .meta { font-size: 13px; color: var(--faint); margin-top: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 8px; }
+  .chip { font-size: 13px; padding: 3px 9px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 550; }
+  .entry.refused .chip { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .purpose { font-size: 14px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 10px; margin: 6px 0 0; }
+  .rule { font-weight: 650; color: var(--bad); font-size: 14px; margin-top: 8px; }
+  .side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; text-align: right; min-width: 150px; }
+  .due { font-size: 13px; }
+  .due b { display: block; font-size: 14px; color: var(--fg); white-space: nowrap; }
+  .side .row { display: flex; gap: 6px; }
+  .checks { grid-column: 2 / -1; margin: 4px 0 0; padding: 12px 14px; list-style: none; border-radius: 10px; background: var(--surface-2); font-size: 14px; display: grid; gap: 6px; }
+  .checks li { display: flex; gap: 8px; align-items: flex-start; }
+  .checks .i { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; margin-top: 2px; }
+  .checks .pass .i { background: var(--ok-soft); color: var(--ok); }
+  .checks .fail .i { background: var(--bad-soft); color: var(--bad); }
+  .checks .info { color: var(--muted); font-size: 13px; }
+  .checks .info .i { background: var(--accent-soft); color: var(--accent); }
+
+  /* empty / login */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 36px; box-shadow: var(--shadow); text-align: center; }
+  .panel h2 { margin: 12px 0 6px; font-size: 22px; letter-spacing: -.01em; }
+  .panel p { color: var(--muted); max-width: 520px; margin: 0 auto 18px; }
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 26px 0 0; text-align: left; }
+  .feature { padding: 14px; border-radius: 12px; background: var(--surface-2); font-size: 14px; color: var(--muted); }
+  .feature b { display: block; color: var(--fg); margin-bottom: 2px; }
+  .hero-icon { width: 56px; height: 56px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center; color: #fff;
+               background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+
+  .skeleton { height: 96px; border-radius: var(--radius); background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%);
+              background-size: 200% 100%; animation: shimmer 1.2s infinite linear; border: 1px solid var(--line); }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .note { font-size: 13px; color: var(--faint); margin-top: 22px; line-height: 1.6; }
+  .hidden { display: none !important; }
+
+  @media (max-width: 760px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .features { grid-template-columns: 1fr; }
+    .entry { grid-template-columns: 40px 1fr; }
+    .side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; text-align: left; min-width: 0; }
+    .checks { grid-column: 1 / -1; }
+    .user .name { display: none; }
+    .brand small { display: none; }
+    .toolbar select { flex: 1; }
+    h1 { font-size: 22px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
 </style>
 </head>
 <body>
-<header><div class="wrap">
-  <div><h1>My data releases</h1><div class="muted" id="who">TrustTrail student dashboard (demo, fake data)</div></div>
-  <div id="actions"></div>
+<header class="topbar"><div class="wrap">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+    </div>
+    <div>TrustTrail<small>Student data dashboard · demo with invented data</small></div>
+  </div>
+  <div class="actions" id="actions"></div>
 </div></header>
+
 <main><div class="wrap">
-  <div class="card" id="ledger-status"><span class="muted">Checking the ledger…</span></div>
-  <div class="card" id="content"><span class="muted">Loading…</span></div>
-  <p class="muted">Each row is one release, or one refused request (red), recorded in TrustTrail's hash-chained ledger. Services receive a different
-  pseudonymous ID each; they see only the attributes listed. A receipt proves what was released and what the service
-  promised. It cannot prove the service deleted the data by the date shown.</p>
+  <div id="intro" class="hidden">
+    <h1>Your data releases</h1>
+    <p class="lead">Every time a campus service received your data, or asked for more than it promised, it is recorded here.</p>
+  </div>
+
+  <div class="status wait" id="ledger-status">
+    <div class="dot" aria-hidden="true">…</div>
+    <div><b>Checking the ledger</b><span>Recomputing every entry from the first one.</span></div>
+  </div>
+
+  <div class="stats hidden" id="stats"></div>
+  <div class="toolbar hidden" id="toolbar">
+    <div class="seg" role="group" aria-label="Show">
+      <button type="button" data-kind="all" aria-pressed="true">All</button>
+      <button type="button" data-kind="release" aria-pressed="false">Releases</button>
+      <button type="button" data-kind="violation" aria-pressed="false">Refused</button>
+    </div>
+    <select id="svc-filter" aria-label="Filter by service"></select>
+    <input type="search" id="search" placeholder="Search attributes or purpose" aria-label="Search">
+  </div>
+
+  <div id="content"><div class="list"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div></div>
+
+  <p class="note">Each service gets a different pseudonymous ID for you and sees only the attributes listed. A receipt proves what was
+  released and what the service promised; it cannot prove that the service deleted your data by the date shown.
+  Refused requests are recorded too, and they lower the service's trust level.</p>
 </div></main>
+
 <script>
 const el = (tag, props = {}, ...kids) => {
   const {dataset, ...rest} = props;
   const n = Object.assign(document.createElement(tag), rest);
   if (dataset) Object.assign(n.dataset, dataset);
-  kids.flat().forEach(k => n.append(k instanceof Node ? k : document.createTextNode(String(k))));
+  kids.flat().forEach(k => k !== null && k !== undefined && k !== "" &&
+    n.append(k instanceof Node ? k : document.createTextNode(String(k))));
   return n;
 };
+const svg = (path) => {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("width", "18"); s.setAttribute("height", "18"); s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("fill", "none"); s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2.2");
+  s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+  s.innerHTML = path; return s;
+};
+const ICON = {
+  ok: '<path d="M20 6L9 17l-5-5"/>',
+  bad: '<path d="M18 6L6 18M6 6l12 12"/>',
+  login: '<path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>',
+  shield: '<path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/>',
+};
+const RULES = {undeclared_attribute: "Asked for data its promise didn't cover",
+               after_retention: "Asked again after it promised to delete your data",
+               above_tier_cap: "Asked for more than its trust level allows"};
+const PALETTE = ["#4f46e5", "#0e9f6e", "#d97706", "#db2777", "#0284c7", "#7c3aed", "#dc2626"];
+const colorFor = (id) => PALETTE[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
+const initials = (name) => name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+const today = new Date().toISOString().slice(0, 10);
+const daysUntil = (d) => Math.round((new Date(d + "T00:00:00Z") - new Date(today + "T00:00:00Z")) / 86400000);
+
+function relTime(iso) {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(iso).toLocaleDateString(undefined, {day: "numeric", month: "short", year: "numeric"});
+}
 
 async function ledgerStatus() {
   const box = document.getElementById("ledger-status");
-  const r = await fetch("/ledger/verify").then(r => r.json());
-  box.replaceChildren(r.ok
-    ? el("span", {className: "status pass"}, `✓ Ledger intact: ${r.entries_checked} entries recomputed from the first one.`)
-    : el("span", {className: "status fail"}, `✗ Ledger broken at entry ${r.first_bad_entry}: ${r.reason}`));
+  try {
+    const r = await fetch("/ledger/verify").then(r => r.json());
+    box.className = `status ${r.ok ? "ok" : "bad"}`;
+    box.replaceChildren(el("div", {className: "dot"}, svg(r.ok ? ICON.ok : ICON.bad)),
+      r.ok ? el("div", {}, el("b", {}, "Ledger intact"),
+                 el("span", {}, `All ${r.entries_checked} entries recomputed from the first one and linked correctly.`))
+           : el("div", {}, el("b", {}, `Ledger broken at entry ${r.first_bad_entry}`), el("span", {}, r.reason)));
+  } catch {
+    box.className = "status bad";
+    box.replaceChildren(el("div", {className: "dot"}, svg(ICON.bad)), el("div", {}, el("b", {}, "Could not check the ledger")));
+  }
 }
 
 function anchorText(a) {
   if (a.status === "anchored")
-    return `Blockchain: root of batch #${a.batch_id} on ${a.network}, block ${a.block_number}, tx ${a.tx_hash.slice(0, 12)}…`;
-  if (a.status === "mismatch") return `Blockchain: this entry does NOT match the root anchored in batch #${a.batch_id}`;
-  return `Blockchain: ${a.detail}`;
+    return `Matches batch #${a.batch_id} anchored on ${a.network}, block ${a.block_number}, tx ${a.tx_hash.slice(0, 12)}…`;
+  if (a.status === "mismatch") return `Does NOT match the root anchored in batch #${a.batch_id}`;
+  return a.detail;
 }
 
-async function verify(id, out) {
-  out.replaceChildren(el("span", {className: "muted"}, "Verifying…"));
+async function verify(id, box) {
+  box.classList.remove("hidden");
+  box.replaceChildren(el("li", {className: "info"}, el("span", {className: "i"}, "…"), "Verifying…"));
   const r = await fetch(`/dashboard/api/verify/${id}`).then(r => r.json());
-  out.replaceChildren(el("ul", {className: "result"},
-    Object.entries(r.checks).map(([name, ok]) =>
-      el("li", {className: ok ? "pass" : "fail"}, `${ok ? "✓" : "✗"} ${name}`)),
-    el("li", {className: "muted"}, anchorText(r.anchor))));
+  box.replaceChildren(
+    ...Object.entries(r.checks).map(([name, ok]) =>
+      el("li", {className: ok ? "pass" : "fail"}, el("span", {className: "i"}, ok ? "✓" : "✕"), name[0].toUpperCase() + name.slice(1))),
+    el("li", {className: "info"}, el("span", {className: "i"}, "⛓"), `Blockchain: ${anchorText(r.anchor)}`));
+}
+
+function entryCard(x) {
+  const refused = x.kind === "violation";
+  const checks = el("ul", {className: "checks hidden", ariaLive: "polite"});
+  const verifyBtn = el("button", {className: "btn sm", type: "button", onclick: () => verify(x.entry_id, checks)}, "Verify");
+  let side;
+  if (refused) {
+    side = el("div", {className: "side"},
+      el("span", {className: "badge bad"}, "Refused · nothing released"),
+      el("div", {className: "row"}, verifyBtn));
+  } else {
+    const d = x.delete_by ? daysUntil(x.delete_by) : null;
+    const due = d === null ? el("span", {className: "badge"}, "no deletion date")
+      : d < 0 ? el("span", {className: "badge warn"}, "should be deleted")
+      : el("span", {className: "badge ok"}, d === 0 ? "delete today" : `${d} day${d === 1 ? "" : "s"} left`);
+    side = el("div", {className: "side"},
+      el("div", {className: "due"}, el("b", {}, x.delete_by || "–"), "delete by"), due,
+      el("div", {className: "row"},
+        el("a", {className: "btn sm", href: `/dashboard/receipts/${x.entry_id}`}, "Receipt"), verifyBtn));
+  }
+  return el("article", {className: `entry${refused ? " refused" : ""}`},
+    el("div", {className: "svc", style: `background:${colorFor(x.service_id || x.service)}`, ariaHidden: "true"}, initials(x.service)),
+    el("div", {},
+      el("div", {className: "head"}, el("h3", {}, x.service), el("span", {className: "badge"}, `${x.profile} profile`)),
+      el("div", {className: "meta", title: new Date(x.time).toLocaleString()}, `${relTime(x.time)} · entry #${x.entry_id}`),
+      el("div", {className: "chips"}, (refused ? x.requested : x.attributes).map(a => el("span", {className: "chip"}, a))),
+      refused ? el("div", {className: "rule"}, RULES[x.rule] || x.rule) : null,
+      x.purpose ? el("p", {className: "purpose"}, refused ? `Its promise: ${x.purpose}` : x.purpose) : null),
+    side, checks);
+}
+
+const state = {kind: "all", svc: "", q: ""};
+let all = [];
+
+function render() {
+  const q = state.q.toLowerCase();
+  const shown = all.filter(x => (state.kind === "all" || x.kind === state.kind)
+    && (!state.svc || x.service === state.svc)
+    && (!q || [x.purpose, ...(x.attributes || []), ...(x.requested || []), x.service].join(" ").toLowerCase().includes(q)));
+  const content = document.getElementById("content");
+  content.replaceChildren(shown.length ? el("div", {className: "list"}, shown.map(entryCard))
+    : el("div", {className: "panel"}, el("p", {}, "No entries match these filters.")));
+}
+
+function renderStats() {
+  const releases = all.filter(x => x.kind !== "violation");
+  const refused = all.length - releases.length;
+  const services = new Set(releases.map(x => x.service)).size;
+  const overdue = releases.filter(x => x.delete_by && x.delete_by < today).length;
+  const stat = (n, l, alert) => el("div", {className: `stat${alert ? " alert" : ""}`}, el("div", {className: "n"}, n), el("div", {className: "l"}, l));
+  document.getElementById("stats").replaceChildren(
+    stat(releases.length, "Releases recorded"), stat(services, "Services with your data"),
+    stat(refused, "Refused requests", refused > 0), stat(overdue, "Past deletion date", overdue > 0));
+  const sel = document.getElementById("svc-filter");
+  sel.replaceChildren(el("option", {value: ""}, "All services"),
+    [...new Set(all.map(x => x.service))].sort().map(s => el("option", {value: s}, s)));
+}
+
+function loginPanel() {
+  document.getElementById("actions").replaceChildren(
+    el("a", {className: "btn primary", href: "/dashboard/login"}, svg(ICON.login), "Log in with university SSO"));
+  document.getElementById("content").replaceChildren(el("div", {className: "panel"},
+    el("div", {className: "hero-icon"}, svg(ICON.shield)),
+    el("h2", {}, "See who received your data"),
+    el("p", {}, "Log in with your university account to see every release of your data to campus services, check it against the tamper-evident ledger, and download signed receipts."),
+    el("a", {className: "btn primary", href: "/dashboard/login"}, svg(ICON.login), "Log in with university SSO"),
+    el("div", {className: "features"},
+      el("div", {className: "feature"}, el("b", {}, "What and why"), "Which attributes each service got, its stated purpose and its delete-by date."),
+      el("div", {className: "feature"}, el("b", {}, "Verify it yourself"), "Each entry is checked against its hash, the chain, its receipt and the blockchain anchor."),
+      el("div", {className: "feature"}, el("b", {}, "Keep the evidence"), "Download signed receipts that you can verify later without TrustTrail."))));
 }
 
 async function load() {
   const res = await fetch("/dashboard/api/releases");
-  const content = document.getElementById("content");
-  const actions = document.getElementById("actions");
-  if (res.status === 401) {
-    content.replaceChildren(el("p", {}, "Log in to see which services received your data."));
-    actions.replaceChildren(el("a", {className: "btn primary", href: "/dashboard/login"}, "Log in with university SSO"));
-    return;
-  }
+  if (res.status === 401) { loginPanel(); return; }
   const data = await res.json();
-  document.getElementById("who").textContent = `Logged in as ${data.student}`;
-  actions.replaceChildren(
-    el("a", {className: "btn", href: "/dashboard/receipts"}, "Download all receipts"), " ",
-    el("a", {className: "btn", href: "/dashboard/logout"}, "Log out"));
-  if (!data.releases.length) {
-    content.replaceChildren(el("p", {}, "No service has received any of your data yet."));
+  document.getElementById("actions").replaceChildren(
+    el("div", {className: "user"}, el("div", {className: "avatar"}, initials(data.student)), el("span", {className: "name"}, data.student)),
+    el("a", {className: "btn sm", href: "/dashboard/receipts"}, "Download all receipts"),
+    el("a", {className: "btn sm", href: "/dashboard/logout"}, "Log out"));
+  document.getElementById("intro").classList.remove("hidden");
+  all = data.releases;
+  if (!all.length) {
+    document.getElementById("content").replaceChildren(el("div", {className: "panel"},
+      el("div", {className: "hero-icon"}, svg(ICON.shield)), el("h2", {}, "Nothing released yet"),
+      el("p", {}, "No service has received any of your data so far.")));
     return;
   }
-  const today = new Date().toISOString().slice(0, 10);
-  const RULES = {undeclared_attribute: "asked for data its promise didn't cover",
-                 after_retention: "asked again after it promised to delete your data",
-                 above_tier_cap: "asked for more than its trust level allows"};
-  const rows = data.releases.map(x => {
-    const out = el("div");
-    if (x.kind === "violation") return el("tr", {className: "refused"},
-      el("td", {dataset: {label: "When"}}, new Date(x.time).toLocaleString()),
-      el("td", {dataset: {label: "Service"}}, x.service, el("div", {className: "muted"}, `profile: ${x.profile}`)),
-      el("td", {dataset: {label: "Attributes"}}, el("div", {className: "fail"}, "Refused, nothing released"),
-        el("div", {className: "muted"}, "asked for: "), x.requested.map(a => el("span", {className: "tag"}, a))),
-      el("td", {dataset: {label: "Purpose"}}, el("b", {}, `Violation: ${RULES[x.rule] || x.rule}. `), x.purpose),
-      el("td", {dataset: {label: "Delete by"}}, x.delete_by || "–"),
-      el("td", {dataset: {label: "Evidence"}},
-        el("button", {onclick: () => verify(x.entry_id, out)}, "Verify"),
-        el("div", {className: "muted"}, `entry #${x.entry_id}`), out));
-    return el("tr", {},
-      el("td", {dataset: {label: "When"}}, new Date(x.time).toLocaleString()),
-      el("td", {dataset: {label: "Service"}}, x.service, el("div", {className: "muted"}, `profile: ${x.profile}`)),
-      el("td", {dataset: {label: "Attributes"}}, x.attributes.map(a => el("span", {className: "tag"}, a))),
-      el("td", {dataset: {label: "Purpose"}}, x.purpose),
-      el("td", {dataset: {label: "Delete by"}, className: x.delete_by < today ? "overdue" : ""},
-        x.delete_by, x.delete_by < today ? el("div", {}, "should be deleted") : ""),
-      el("td", {dataset: {label: "Evidence"}},
-        el("a", {className: "btn", href: `/dashboard/receipts/${x.entry_id}`}, "Receipt"), " ",
-        el("button", {onclick: () => verify(x.entry_id, out)}, "Verify"),
-        el("div", {className: "muted"}, `entry #${x.entry_id}`), out));
-  });
-  content.replaceChildren(el("table", {},
-    el("thead", {}, el("tr", {}, ["When", "Service", "Attributes", "Purpose", "Delete by", "Evidence"].map(h => el("th", {}, h)))),
-    el("tbody", {}, rows)));
+  ["stats", "toolbar"].forEach(id => document.getElementById(id).classList.remove("hidden"));
+  renderStats();
+  render();
 }
+
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".seg button").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+  state.kind = b.dataset.kind; render();
+}));
+document.getElementById("svc-filter").addEventListener("change", e => { state.svc = e.target.value; render(); });
+document.getElementById("search").addEventListener("input", e => { state.q = e.target.value; render(); });
 
 ledgerStatus();
 load();

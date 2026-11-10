@@ -90,11 +90,12 @@ receipt_timeout_seconds: 180
 \label{app:repro}
 
 \begin{lstlisting}[caption={Commands to run the system, the tests and the evaluation}, label={lst:repro}]
+git clone https://github.com/desmond009/Trust-Trail.git && cd Trust-Trail
 cp .env.example .env                    # local demo values only
 docker compose up -d --build            # Keycloak, chain, TrustTrail, services
 docker compose run --rm trusttrail python -m scripts.seed   # (re)creates the realm
 
-docker compose exec trusttrail pytest   # 94 unit + 55 integration tests
+docker compose exec trusttrail pytest   # 94 unit + 57 integration tests
 docker compose run --rm chain-deploy npx hardhat test       # 6 contract tests
 scripts/check_browser_sso.sh            # browser-level unlinkability check
 scripts/check_dashboard.sh              # dashboard and receipt check

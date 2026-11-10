@@ -22,16 +22,18 @@ def _signing_key(token: str):
 
 
 def verify_access_token(token: str) -> dict:
-    """Check a service's Keycloak access token locally (signature, issuer, expiry).
+    """Check a service's Keycloak access token locally (signature, issuer, expiry, audience).
 
-    No audience check: Keycloak does not put our services in `aud` by default,
-    so the calling service is identified by `azp` (the client the token was issued to).
+    The token must name TrustTrail in `aud`: every service client has a Keycloak
+    audience mapper for it (scripts/seed.py), so a token issued for some other
+    resource server, or by a client without the mapper, is refused. The calling
+    service is identified by `azp` (the client the token was issued to).
     Revocation is not checked; a token stays usable until it expires.
     """
     try:
         key = _signing_key(token)
         claims = jwt.decode(token, key, algorithms=["RS256"], issuer=settings.ISSUER,
-                            options={"verify_aud": False})
+                            audience=settings.AUDIENCE)
     except jwt.PyJWTError as e:
         raise TokenError(str(e)) from e
     if claims.get("typ") != "Bearer" or not claims.get("azp") or not claims.get("sub"):

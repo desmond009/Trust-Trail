@@ -169,7 +169,7 @@ signature is the authentication.
 profile allows". → `200`:
 ```json
 {"service": "lms", "profile": "partial", "declaration_id": "226617abd0d39a21",
- "released": {"sub": "97d4…", "department": "Computer Science"},
+ "entry_id": 12, "released": {"sub": "97d4…", "department": "Computer Science"},
  "receipt": "<JWS signed by TrustTrail, typ release-receipt+jwt>"}
 ```
 The receipt payload contains `iss`, `iat`, `jti`, `service`, `profile`, `attributes` (names only,
@@ -226,12 +226,14 @@ rule-breaking refusals write a `violation` entry instead.
 | Field | |
 |---|---|
 | `entry_id` | 1, 2, 3, ... assigned by TrustTrail, so gaps are visible |
-| `kind` | `release` (Phase 4 adds `violation`) |
+| `kind` | `release` (Phase 4 adds `violation` and `trust_reset`) |
+| `rule` | violation rule for a `violation` entry, `""` otherwise |
 | `time` | ISO 8601 UTC, microseconds |
 | `service_id` | client ID of the service |
 | `student_pseudonym` | the per-service pairwise ID, **never** the Keycloak user ID |
 | `profile` | profile Keycloak granted |
-| `attributes_released` | sorted list of names, never values |
+| `attributes_requested` | list of names the service asked for |
+| `attributes_released` | sorted list of names, never values (`[]` for a violation) |
 | `purpose`, `retention_until`, `declaration_id` | copied from the signed declaration |
 | `service_signature` | signature part of the service's declaration JWS (full JWS kept in `declarations`) |
 | `prev_hash` | `entry_hash` of the previous entry; 64 zeros for entry 1 |
@@ -550,11 +552,11 @@ after a warm-up, and reports median and p95.
 
 | Variant | Runs | Median (ms) | p95 (ms) | Mean (ms) |
 |---|---|---|---|---|
-| Plain OIDC login (no privacy layer) | 200 | 17.1 | 19.1 | 17.4 |
-| TrustTrail login + release (total) | 200 | 21.2 | 24.7 | 21.6 |
-| of which: TrustTrail `/release` | 200 | 4.2 | 5.8 | 4.4 |
+| Plain OIDC login (no privacy layer) | 200 | 16.0 | 20.2 | 16.7 |
+| TrustTrail login + release (total) | 200 | 19.6 | 25.6 | 20.1 |
+| of which: TrustTrail `/release` | 200 | 3.6 | 5.1 | 3.8 |
 
-Overhead: median **+4.0 ms**, p95 **+5.6 ms** (an earlier run gave +3.4 / +4.5 ms; one laptop, all containers local, password grant;
+Overhead: median **+3.6 ms**, p95 **+5.5 ms** (run of 2026-11-10; earlier runs gave +4.0 / +5.6 ms and +3.4 / +4.5 ms; one laptop, all containers local, password grant;
 a browser login adds the same redirects to both). Anchoring runs in the background and is not
 on the login path. Each TrustTrail run is a real release, so the benchmark adds ledger entries.
 

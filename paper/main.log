@@ -996,30 +996,32 @@ put line 256.
 (sections/09-evaluation [26]
 File: figures/latency_ecdf.pdf Graphic file (type pdf)
 <use figures/latency_ecdf.pdf>
- [27] [28] [29] [30]) (sections/10-discussion
-[31] [32] [33]) (sections/11-future-work [34]) (sections/12-conclusion [35])
-(sections/13-backmatter
-Overfull \hbox (66.40454pt too wide) in paragraph at lines 9--10
-\TU/texgyretermes(0)/m/n/11 used in the evaluation is deployed on the Sepolia t
-est network at address \TU/texgyrecursor(0)/m/n/11 0x3415e1C6B20E184EA493007A56
-589Cebf2074BC8\TU/texgyretermes(0)/m/n/11 ,
- []
-
-) (sections/appendix [36] [37]) (main.bbl [38]
+ [27]
+LaTeX Font Info:    Font shape `TU/texgyrecursor(0)/m/sc' will be
+(Font)              scaled to size 8.54997pt on input line 58.
+File: figures/release_steps.pdf Graphic file (type pdf)
+<use figures/release_steps.pdf>
+ [28]
+File: figures/load.pdf Graphic file (type pdf)
+<use figures/load.pdf>
+ [29] [30] [31] [32] [33])
+(sections/10-discussion [34] [35] [36]) (sections/11-future-work [37])
+(sections/12-conclusion) (sections/13-backmatter [38]) (sections/appendix
+[39] [40]) (main.bbl
 Underfull \hbox (badness 5592) in paragraph at lines 98--102
 []\TU/texgyretermes(0)/m/n/9 P. Todd, “OpenTimestamps: Scalable, trust-minimize
 d, distributed timestamping with Bitcoin,” []$[][][][][] [] [] [] [][][][][][][
 ][][] [] [][][] [] [][][][] []
  []
 
-[39]
+[41]
 Underfull \hbox (badness 10000) in paragraph at lines 294--297
 []\TU/texgyretermes(0)/m/n/9 C. Allen, “The path to self-sovereign identity,” L
 ife With Alacrity (blog). []$[][][][][] [] [] [] [][][] [] [][][][][][][][][][]
 [][][][][][] [] [][][] [] [][][][] [] [][] []
  []
 
-
+[42]
 Underfull \hbox (badness 5756) in paragraph at lines 365--370
 []\TU/texgyretermes(0)/m/n/9 European Data Protection Board, “Guidelines 02/202
 5 on processing of personal data through blockchain technolo-
@@ -1033,11 +1035,11 @@ Underfull \hbox (badness 10000) in paragraph at lines 365--370
  [] [][][][] []
  []
 
-) [40] (main.aux)
+) [43] (main.aux)
 
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 7218611276672F589EF79471DC368380;19010.
+(rerunfilecheck)             Checksum: D95C641DD947F0C36A0AA165284AF62B;19722.
  )
-Output written on main.xdv (40 pages, 1756800 bytes).
+Output written on main.xdv (43 pages, 1841668 bytes).

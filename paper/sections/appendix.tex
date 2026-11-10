@@ -101,8 +101,12 @@ scripts/check_browser_sso.sh            # browser-level unlinkability check
 scripts/check_dashboard.sh              # dashboard and receipt check
 
 docker compose exec trusttrail sh eval/run_all.sh           # latency, tamper,
-                                                            # violations (~3 min)
+                                                            # violations, steps, load, scaling (~10 min)
 docker compose exec trusttrail python -m scripts.demo_phase5 \
     --batches 3 --interval 12           # anchoring gas and delay
 docker compose exec trusttrail python -m scripts.verify_anchors
+
+docker compose exec trusttrail python -m eval.bench_release_steps --runs 200   # time per step
+docker compose exec trusttrail python -m eval.bench_load --levels 1,10,25,50     # concurrency
+docker compose exec trusttrail python -m eval.bench_scaling                       # ledger size
 \end{lstlisting}

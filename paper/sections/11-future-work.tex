@@ -17,5 +17,5 @@ Two points limit what the study can show. The per-attribute choice exists only i
 \item \emph{Selective-disclosure credentials.} Issuing attributes as verifiable credentials with selective disclosure~\cite{w3cvc2} could remove TrustTrail from the path of attribute values while keeping declarations and the ledger, and would hide the student's pseudonym map from the operator.
 \item \emph{Federations with several IdPs.} Extending tiers and declarations across institutions, for example for shared library or examination services, raises the agreement questions that the survey describes for dynamic federations.
 \item \emph{Independent scoring.} The taxonomy assessment in Table~\ref{tab:taxonomy} should be repeated by assessors who did not build TrustTrail.
-\item \emph{Load testing and hardening.} Measuring throughput under concurrent load, moving the ledger to a server database, narrowing TrustTrail's Keycloak permissions, and running Keycloak in production mode.
+\item \emph{Scaling out and hardening.} Running several TrustTrail processes over a server database, caching student records to avoid the per-release Keycloak call (Section~\ref{sec:eval-steps}), load testing with realistic traffic, narrowing TrustTrail's Keycloak permissions, and running Keycloak in production mode.
 \end{itemize}

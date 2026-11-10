@@ -1,0 +1,4 @@
+entries,append_s,verify_s,db_bytes,root_ms,proof_min,proof_max,proof_check_us_median
+1000,0.695,0.009,516096,0.3,8,10,3.75
+10000,6.868,0.098,4624384,2.72,12,14,5.25
+100000,131.468,1.095,45682688,29.08,13,17,6.96

@@ -1,7 +1,7 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-The evaluation answers the research questions of Section~\ref{sec:intro} with five experiments: a functional check of what services receive (RQ1), the cost of the privacy layer in login latency (RQ5), conformance tests for tampering with the ledger (RQ3) and for misbehaving services (RQ2, RQ4), and the cost and delay of anchoring on a local chain and on a public test network (RQ3, RQ5). It ends with a comparison against the base survey's taxonomy.
+The evaluation answers the research questions of Section~\ref{sec:intro} with eight experiments: a functional check of what services receive (RQ1); the cost of the privacy layer in login latency, where that time goes, how the release service behaves under concurrent load, and how ledger and proof costs grow with size (RQ5); conformance tests for tampering with the ledger (RQ3) and for misbehaving services (RQ2, RQ4), and the cost and delay of anchoring on a local chain and on a public test network (RQ3, RQ5). It ends with a comparison against the base survey's taxonomy.
 
 The tamper and violation experiments need a word of caution before the results. We wrote the attacks, the scripted services and the expected outcomes ourselves. These experiments are therefore \emph{conformance tests}: they show that each mechanism behaves as designed against the attacks and misbehaviours we specified. They are not estimates of how often a real attacker or a real service would be caught.
 
@@ -44,7 +44,104 @@ Difference (TrustTrail $-$ plain) & +3.2 & +3.4 & & & \\
 \label{fig:latency}
 \end{figure}
 
-\emph{Interpretation.} The absolute cost, about 3\,ms per login, is the meaningful figure. The relative figure (about 21\%) is large only because the baseline is a 15\,ms token request over the loopback interface; a browser login with redirects and page loads, or any network between the parties, would make the same few milliseconds a much smaller fraction. We did not time the steps inside \code{/release} separately, and a deployment would add one network round trip from the service to TrustTrail. The benchmark uses one service, one client at a time and the password grant; it does not measure behaviour under concurrent load, and all database writes go through one lock (Section~\ref{sec:discussion}).
+\emph{Interpretation.} The absolute cost, about 3\,ms per login, is the meaningful figure. The relative figure (about 21\%) is large only because the baseline is a 15\,ms token request over the loopback interface; a browser login with redirects and page loads, or any network between the parties, would make the same few milliseconds a much smaller fraction. A deployment would add one network round trip from the service to TrustTrail. This benchmark uses one service, one client at a time and the password grant; the next three subsections break the release time down by step, load the release service with concurrent clients, and grow the ledger.
+
+
+\subsection{Where the time inside a release goes}
+\label{sec:eval-steps}
+\emph{Method.} A separate script runs the steps of \code{/release} (Algorithm~\ref{alg:release}) in the same order and with the same functions, inside one process, and times each step with \code{time.perf\_counter}. It works on a copy of TrustTrail's data directory, so the live ledger is not touched; the calls to Keycloak are real. We ran 200 releases for the LMS after 10 warm-up runs; tokens were obtained beforehand and are not timed.
+
+\emph{Results.} Table~\ref{tab:steps} and Fig.~\ref{fig:steps} show that two steps take most of the time. Fetching the student's record from Keycloak's Admin API took a median of 0.50\,ms (43\% of the mean), and storing the receipt and committing the SQLite transaction took 0.48\,ms (38\%). Verifying the token's RS256 signature took 0.10\,ms, appending the ledger entry, including computing its SHA-256 hash, 0.05\,ms, and signing the receipt with ES256 0.05\,ms. All checks of the declaration, retention date, trust cap and attributes together took under 0.04\,ms. The in-process total had a median of 1.2\,ms, against a median of 3.5\,ms for the same call over HTTP in Table~\ref{tab:latency}; the difference, about 2.3\,ms, is spent in the HTTP server, FastAPI's request handling and JSON encoding.
+
+\begin{table}[t]
+\centering
+\caption{Time per step inside \code{/release}, 200 runs (in process, on a copy of the data)}
+\label{tab:steps}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Step & Median (ms) & p95 (ms) & Share of mean \\
+\midrule
+Verify token (RS256, issuer, audience) & 0.096 & 0.110 & 8\% \\
+Find declaration & 0.016 & 0.022 & 1\% \\
+Apply trust cap & 0.010 & 0.012 & 1\% \\
+Rule checks (declaration, retention, attributes) & 0.005 & 0.007 & 0\% \\
+Map pseudonym to student & 0.006 & 0.008 & 1\% \\
+Fetch attributes from Keycloak (HTTP) & 0.503 & 0.657 & 43\% \\
+Build release & 0.002 & 0.002 & 0\% \\
+Append ledger entry (hash chain) & 0.047 & 0.070 & 4\% \\
+Sign receipt (ES256) & 0.053 & 0.068 & 4\% \\
+Store receipt and commit & 0.480 & 0.697 & 38\% \\
+\midrule
+Total in process & 1.217 & 1.568 & 100\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/release_steps.pdf}
+\caption{Median time per step inside \code{/release}. The privacy checks themselves are negligible; the cost is one call to Keycloak and one durable database commit.}
+\label{fig:steps}
+\end{figure}
+
+\emph{Interpretation.} The mechanisms that make TrustTrail privacy-preserving cost very little: the purpose, retention, trust and attribute checks together take microseconds, and the cryptography (hash chain, token verification, receipt signature) about 0.2\,ms. The time goes to two pieces of plumbing. The call to Keycloak could be avoided by caching student records for a short time, at the cost of serving slightly stale attributes. The commit is the price of the rule ``no release without a record'': the ledger entry and receipt must be durable before the attributes leave TrustTrail. Most of the 3.5\,ms that a service sees is HTTP handling, which a different web stack could reduce but which does not depend on the design.
+
+\subsection{Behaviour under concurrent load}
+\label{sec:eval-load}
+\emph{Method.} The load script sends \code{/release} calls from 1, 10, 25 and 50 concurrent client threads. For each level it obtains 300 LMS tokens beforehand, sends five warm-up calls, then sends the remaining 295 calls as fast as the threads allow, and records each call's latency and the wall-clock time of the level. Every call is a real release that writes a ledger entry and a receipt. TrustTrail ran as one Uvicorn worker process, as in all other experiments. After the run we checked the hash chain.
+
+\emph{Results.} Table~\ref{tab:load} and Fig.~\ref{fig:load} show that throughput rose from 212 releases per second with one client to a peak of 534 with 25 clients, and fell slightly to 489 with 50. Median latency grew roughly in proportion to the number of clients once throughput stopped rising: 2.0\,ms with one client, 18\,ms with 10, 41\,ms with 25 and 90\,ms with 50. All 1{,}180 measured calls succeeded, and the chain verified afterwards, with 2{,}649 entries.
+
+\begin{table}[t]
+\centering
+\caption{\code{/release} under concurrent load (295 measured calls per level, one server process)}
+\label{tab:load}
+\small
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+Clients & Errors & Releases/s & Median (ms) & p95 (ms) & p99 (ms) & Max (ms) \\
+\midrule
+1 & 0 & 212 & 2.0 & 2.6 & 3.2 & 4.1 \\
+10 & 0 & 468 & 18.0 & 27.9 & 34.5 & 41.8 \\
+25 & 0 & 534 & 41.1 & 66.4 & 82.1 & 93.3 \\
+50 & 0 & 489 & 90.3 & 139.2 & 184.6 & 209.3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{figures/load.pdf}
+\caption{Throughput (left) and latency (right) of \code{/release} as the number of concurrent clients grows. Throughput levels off at about 500 releases per second; beyond that point, extra clients only wait longer.}
+\label{fig:load}
+\end{figure}
+
+\emph{Interpretation.} One TrustTrail process saturates at about 500 releases per second on this laptop. Past that point the requests queue: latency grows with the number of waiting clients while throughput stays flat, which is the expected shape for a service whose writes pass through one lock and one Python process. The concurrency did not break the ledger: entry numbers and hash links stayed consistent under 50 simultaneous writers. For scale, a campus of 10{,}000 students in which every student logs in to five services within the same ten minutes produces about 83 releases per second, a sixth of the measured capacity. A larger deployment would run several processes in front of a database server that serialises only the ledger append. The single-client median here (2.0\,ms) is lower than in Table~\ref{tab:latency} (3.5\,ms) because this script sends only \code{/release} calls on a reused connection, while the latency benchmark alternates them with token requests to Keycloak.
+
+\subsection{How ledger and proof costs grow}
+\label{sec:eval-scaling}
+\emph{Method.} The scaling script builds synthetic ledgers of 1{,}000, 10{,}000 and 100{,}000 entries in a temporary SQLite file, using TrustTrail's own \code{ledger.append} with one transaction per entry, as in \code{/release}. For each size it measures the append time per entry, the time to verify the whole chain from the first entry, the database size per entry, the time to compute a Merkle root over that many entries, and, for 200 random entries, the proof length and the time to check a proof.
+
+\emph{Results.} Table~\ref{tab:scaling} shows that verification time grows linearly with the ledger: 0.01\,s for 1{,}000 entries, 0.10\,s for 10{,}000 and 1.1\,s for 100{,}000. Storage was about 460 bytes per entry. Appending took about 0.7\,ms per entry up to 10{,}000 entries and 1.3\,ms at 100{,}000. Merkle proofs grow logarithmically: from at most 10 sibling hashes (320 bytes) at 1{,}000 entries to at most 17 (544 bytes) at 100{,}000, and checking one proof took under 10\,µs at every size. Computing the root of 100{,}000 entries took 29\,ms.
+
+\begin{table}[t]
+\centering
+\caption{Ledger and Merkle costs by size (synthetic entries, temporary SQLite file)}
+\label{tab:scaling}
+\small
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+Entries & Append (ms/entry) & Verify chain (s) & Storage (B/entry) & Merkle root (ms) & Proof (hashes) & Check proof (µs) \\
+\midrule
+1{,}000 & 0.70 & 0.01 & 516 & 0.3 & 8--10 & 3.8 \\
+10{,}000 & 0.69 & 0.10 & 462 & 2.7 & 12--14 & 5.2 \\
+100{,}000 & 1.32 & 1.10 & 457 & 29.1 & 13--17 & 7.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Interpretation.} Full verification is linear but cheap: a campus ledger of 100{,}000 entries can be re-checked from the first entry in about a second, which is why the dashboard can afford to verify the whole chain on every visit. A student who checks a single receipt never needs the whole ledger: the proof is a few hundred bytes and takes microseconds to check, whatever the size of the batch. In TrustTrail a batch holds at most 5{,}000 entries, so real proofs have at most 13 hashes. Storage of about 0.5\,KB per entry means that a million releases need about half a gigabyte, before receipts. The rise in append time at 100{,}000 entries, which we did not investigate further, still leaves appending far below the cost of a commit in Table~\ref{tab:steps}.
 
 \subsection{Tamper conformance}
 \label{sec:eval-tamper}
@@ -186,8 +283,8 @@ The comparison shows that TrustTrail is not the first work to address accountabi
 \item \textbf{RQ2} (purpose binding): yes. No release happens without a declaration signed by the service, requests outside it or after its deletion date are refused and recorded, and each release has a receipt bound to the declaration's hash. Non-repudiation rests on the service's client secret, which authorises key registration.
 \item \textbf{RQ3} (tamper evidence): yes for anchored history. All six attacks were detected as designed, and on Sepolia the anchor check detects rewrites and truncation of anchored history even by the operator, with only hashes on chain (Table~\ref{tab:tamper}). Entries newer than the last anchor rely on receipts that students may or may not hold, and a release that TrustTrail never records is not detected.
 \item \textbf{RQ4} (trust feedback): yes for the three observable rules; every scripted violation was recorded and demoted the service, with no false positives in 90 honest releases (Table~\ref{tab:violations}).
-\item \textbf{RQ5} (cost): a median of 3.2\,ms per login (95\% CI 3.0--3.4\,ms) on one machine, and 254{,}408 gas per anchor on Sepolia regardless of batch size.
+\item \textbf{RQ5} (cost): a median of 3.2\,ms per login (95\% CI 3.0--3.4\,ms) on one machine, of which the privacy checks and cryptography are about 0.24\,ms; about 500 releases per second from one server process; linear chain verification (1.1\,s for 100{,}000 entries) with logarithmic proofs; and 254{,}408 gas per anchor on Sepolia regardless of batch size.
 \end{itemize}
 
 \subsection{Threats to validity}
-\emph{Conclusion validity.} The tamper and violation results are conformance tests whose expected outcomes we fixed in advance, so their 100\% figures say that the implementation matches its design, not that the design catches a given share of real attacks. The violation experiment has three independent starts per service, and the tamper experiment five repetitions per attack. The receipt results assume that every affected student keeps receipts. \emph{Internal validity.} The latency benchmark uses the password grant, which skips the browser redirects; both variants skip them equally, but the TrustTrail variant's token request also differs from the baseline's (pairwise identifier, audience and session mappers, no claim mappers). \emph{External validity.} The latency and violation measurements come from one laptop with local containers, invented data, five students and six services; a deployment adds network latency, more users and concurrent load. The anchoring cost and delay come from three batches on a test network with almost free gas; prices and inclusion times on a main network differ. \emph{Construct validity.} The taxonomy marks for TrustTrail are a self-assessment, and the survey's characteristics are broad enough that reasonable assessors could disagree, especially about controllability and trust.
+\emph{Conclusion validity.} The tamper and violation results are conformance tests whose expected outcomes we fixed in advance, so their 100\% figures say that the implementation matches its design, not that the design catches a given share of real attacks. The violation experiment has three independent starts per service, and the tamper experiment five repetitions per attack. The receipt results assume that every affected student keeps receipts. \emph{Internal validity.} The latency benchmark uses the password grant, which skips the browser redirects; both variants skip them equally, but the TrustTrail variant's token request also differs from the baseline's (pairwise identifier, audience and session mappers, no claim mappers). \emph{External validity.} The latency, load, scaling and violation measurements come from one laptop with local containers, invented data, five students and six services; a deployment adds network latency between the parties, real attribute stores and more varied traffic. The load test used one server process and one service, and the scaling test synthetic entries. The anchoring cost and delay come from three batches on a test network with almost free gas; prices and inclusion times on a main network differ. \emph{Construct validity.} The taxonomy marks for TrustTrail are a self-assessment, and the survey's characteristics are broad enough that reasonable assessors could disagree, especially about controllability and trust.

@@ -8,5 +8,8 @@ echo "== (a) latency";            python -m eval.bench_latency --runs 200
 echo "== (b) tamper test";        python -m eval.tamper_test --repeat 5
 echo "== (b) violation test";     python -m eval.violation_test --repeat 3 --attempts 5
 echo "== (c) taxonomy chart";     python -m eval.plot_taxonomy
+echo "== (e) /release steps";      python -m eval.bench_release_steps --runs 200
+echo "== (f) load";               python -m eval.bench_load --levels 1,10,25,50 --requests 300
+echo "== (g) scaling";            python -m eval.bench_scaling --sizes 1000,10000,100000
 echo
-echo "Results in eval/results/: latency.md, tamper.md, violations.md, taxonomy_chart.png (+ raw CSVs)"
+echo "Results in eval/results/: latency.md, tamper.md, violations.md, taxonomy_chart.png, release_steps.md, load.md, scaling.md (+ raw CSVs)"

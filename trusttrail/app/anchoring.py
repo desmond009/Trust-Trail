@@ -17,7 +17,10 @@ import logging
 import os
 import threading
 import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from web3 import Web3
 
@@ -44,6 +47,15 @@ class Anchorer:
         self.private_key = os.environ.get("ANCHOR_PRIVATE_KEY", "")
         self._lock = threading.Lock()   # one anchoring transaction at a time
 
+    def scrub(self, text: str) -> str:
+        """Hide the RPC URL's path and query: hosted RPCs (Alchemy, Infura) put the API key there."""
+        parts = urlsplit(self.rpc_url)
+        secret = parts.path.strip("/") + (f"?{parts.query}" if parts.query else "")
+        if secret:
+            text = text.replace(self.rpc_url, f"{parts.scheme}://{parts.netloc}/<redacted>")
+            text = text.replace(secret, "<redacted>")
+        return text
+
     # --- connecting -----------------------------------------------------------------
 
     def deployment(self) -> dict:
@@ -54,20 +66,29 @@ class Anchorer:
     def contract(self):
         dep = self.deployment()
         w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 20}))
-        if not w3.is_connected():
-            raise AnchorUnavailable(f"chain not reachable at {self.rpc_url}")
-        if w3.eth.chain_id != dep["chainId"]:
-            raise AnchorUnavailable(f"RPC is chain {w3.eth.chain_id}, deployment is for chain {dep['chainId']}")
+        try:
+            chain_id = w3.eth.chain_id   # a real call, so a failure says why (DNS, timeout, 401, 429, ...)
+        except Exception as e:
+            raise AnchorUnavailable(self.scrub(f"chain not reachable at {self.rpc_url}: "
+                                               f"{type(e).__name__}: {e}")) from None
+        if chain_id != dep["chainId"]:
+            raise AnchorUnavailable(f"RPC is chain {chain_id}, deployment is for chain {dep['chainId']}")
         return w3, w3.eth.contract(address=dep["address"], abi=dep["abi"]), dep
 
-    def on_chain_batch(self, batch_id: int) -> dict:
-        _, contract, _ = self.contract()
+    def on_chain_batch(self, batch_id: int, contract=None) -> dict:
+        if contract is None:
+            _, contract, _ = self.contract()
         root, first, last, at = contract.functions.getBatch(batch_id).call()
         return {"root": bytes(root).hex(), "first_entry_id": first, "last_entry_id": last, "anchored_at": at}
 
     def on_chain_batches(self) -> list[dict]:
+        # One connection check, then the getBatch reads in parallel: on a hosted RPC each read is
+        # a ~1 s round trip, so reading 25+ batches one by one made /anchors take 30 s.
         _, contract, _ = self.contract()
-        return [self.on_chain_batch(i) | {"batch_id": i} for i in range(contract.functions.batchCount().call())]
+        ids = range(contract.functions.batchCount().call())
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            batches = list(pool.map(lambda i: self.on_chain_batch(i, contract), ids))
+        return [b | {"batch_id": i} for i, b in zip(ids, batches)]
 
     # --- anchoring --------------------------------------------------------------------
 
@@ -110,8 +131,10 @@ class Anchorer:
         while True:
             try:
                 self.run_once()
-            except Exception:   # chain restarting, not deployed yet, ...
-                log.exception("anchoring failed; will retry next interval")
+            except AnchorUnavailable as e:   # chain restarting, network down, not deployed yet, ...
+                log.warning("anchoring skipped (%s); will retry next interval", e)
+            except Exception:   # anything else: keep the traceback, minus the RPC key
+                log.error("anchoring failed; will retry next interval\n%s", self.scrub(traceback.format_exc()))
             time.sleep(rules()["interval_seconds"])
 
     def start(self):
